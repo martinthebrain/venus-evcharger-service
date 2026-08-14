@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from venus_evcharger.dbus_gateway_core import gateway_paths
 from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig
+from venus_evcharger.energy.models import EnergySourceDefinition
 from venus_evcharger.inputs.helper.config_runtime import (
     AutoInputHelperSettings,
     load_auto_input_helper_settings,
@@ -91,7 +92,10 @@ class AutoInputHelperConfigContracts(unittest.TestCase):
                     mismatch_samples=3,
                     future_tolerance_seconds=1.0,
                 ),
-                gateway_energy_source=None,
+                gateway_energy_source=EnergySourceDefinition(
+                    source_id="primary_battery",
+                    profile_name="semantic-gateway-battery",
+                ),
                 energy_sources=(),
                 use_combined_battery_soc=True,
                 energy_source_request_timeout_seconds=2.0,

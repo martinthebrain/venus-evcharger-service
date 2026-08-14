@@ -327,7 +327,6 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "SHELLY_PROFILES.md").write_text("profiles\n", encoding="utf-8")
             (source_dir / "version.txt").write_text("Version: 1.2.3\n", encoding="utf-8")
             (source_dir / "venus_evcharger_service.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-            (source_dir / "venus_evcharger_auto_input_helper.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "deploy/venus/install_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_lifecycle.sh").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/boot_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
@@ -347,6 +346,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                 service_run_contents["service_venus_evcharger_dbus_adapter"], encoding="utf-8"
             )
             (source_dir / "deploy/venus/bin").mkdir(parents=True)
+            (source_dir / "deploy/venus/bin/venus-evcharger-auto-input-helper").write_text(
+                "auto-input-helper-binary\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
                 "observer-binary\n",
                 encoding="utf-8",
@@ -507,6 +510,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             self.assertEqual(receipt["version"], "1.2.3")
             self.assertEqual(receipt["critical_files"]["venus_evcharger_service.py"], hashlib.sha256(b"#!/usr/bin/env python3\n").hexdigest())
             self.assertEqual(
+                receipt["critical_files"]["deploy/venus/bin/venus-evcharger-auto-input-helper"],
+                hashlib.sha256(b"auto-input-helper-binary\n").hexdigest(),
+            )
+            self.assertEqual(
                 receipt["critical_files"]["deploy/venus/bin/venus-evcharger-forensic-observer"],
                 hashlib.sha256(b"observer-binary\n").hexdigest(),
             )
@@ -534,7 +541,6 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "SHELLY_PROFILES.md").write_text("profiles\n", encoding="utf-8")
             (source_dir / "version.txt").write_text("1.2.3\n", encoding="utf-8")
             (source_dir / "venus_evcharger_service.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-            (source_dir / "venus_evcharger_auto_input_helper.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "deploy/venus/install_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_lifecycle.sh").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/boot_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
@@ -545,6 +551,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/bin").mkdir(parents=True)
+            (source_dir / "deploy/venus/bin/venus-evcharger-auto-input-helper").write_text(
+                "auto-input-helper-binary\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
                 "observer-binary\n",
                 encoding="utf-8",
@@ -598,7 +608,6 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "SHELLY_PROFILES.md").write_text("profiles\n", encoding="utf-8")
             (source_dir / "version.txt").write_text("Version: 2.0.0\n", encoding="utf-8")
             (source_dir / "venus_evcharger_service.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
-            (source_dir / "venus_evcharger_auto_input_helper.py").write_text("#!/usr/bin/env python3\n", encoding="utf-8")
             (source_dir / "deploy/venus/install_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_lifecycle.sh").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/boot_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
@@ -609,6 +618,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/bin").mkdir(parents=True)
+            (source_dir / "deploy/venus/bin/venus-evcharger-auto-input-helper").write_text(
+                "auto-input-helper-binary\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
                 "observer-binary\n",
                 encoding="utf-8",

@@ -40,7 +40,6 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
             "venus_evcharger",
             "scripts/ops",
             "venus_evcharger_service.py",
-            "venus_evcharger_auto_input_helper.py",
             "venus_evchargerctl.py",
         ):
             source = REPO_ROOT / rel_path
@@ -50,6 +49,10 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(source, target)
+        rust_helper = repo_copy / "deploy/venus/bin/venus-evcharger-auto-input-helper"
+        if not rust_helper.exists():
+            rust_helper.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            self._make_executable(rust_helper)
         return repo_copy
 
     def test_runit_entrypoints_replace_the_shell_process(self) -> None:
@@ -90,6 +93,78 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
                 logger = logger_path.read_text(encoding="utf-8")
                 self.assertIn(f"LOG_DIR=/var/volatile/log/{service_name}", logger)
                 self.assertIn('exec multilog t s153600 n2 "$LOG_DIR"', logger)
+
+    def test_installer_requires_rust_helper(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_copy = self._copy_installation_tree(root)
+            service_root = root / "service"
+            rc_local_path = root / "data/rc.local"
+            self._rewrite_shell_paths(repo_copy, service_root, rc_local_path)
+            (repo_copy / "deploy/venus/bin/venus-evcharger-auto-input-helper").unlink()
+
+            result = subprocess.run(
+                ["bash", str(repo_copy / "deploy/venus/install_venus_evcharger_service.sh")],
+                cwd=repo_copy,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Rust auto input helper binary not found", result.stderr)
+
+    def test_arm_installer_validates_auto_input_launch_without_starting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            repo_copy = self._copy_installation_tree(root)
+            service_root = root / "service"
+            rc_local_path = root / "data/rc.local"
+            validation_log = root / "validation.log"
+            command_dir = root / "commands"
+            command_dir.mkdir()
+            self._rewrite_shell_paths(repo_copy, service_root, rc_local_path)
+
+            uname = command_dir / "uname"
+            uname.write_text("#!/bin/sh\nprintf 'armv7l\\n'\n", encoding="utf-8")
+            self._make_executable(uname)
+
+            observer = repo_copy / "deploy/venus/bin/venus-evcharger-forensic-observer"
+            observer.write_text(
+                f"#!/bin/sh\nprintf 'observer %s\\n' \"$*\" >> {validation_log!s}\n",
+                encoding="utf-8",
+            )
+            self._make_executable(observer)
+            rust_helper = repo_copy / "deploy/venus/bin/venus-evcharger-auto-input-helper"
+            rust_helper.write_text(
+                f"#!/bin/sh\nprintf 'auto-input %s\\n' \"$*\" >> {validation_log!s}\n",
+                encoding="utf-8",
+            )
+            self._make_executable(rust_helper)
+
+            result = subprocess.run(
+                ["bash", str(repo_copy / "deploy/venus/install_venus_evcharger_service.sh")],
+                cwd=repo_copy,
+                check=False,
+                capture_output=True,
+                text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{command_dir}{os.pathsep}{os.environ['PATH']}",
+                    "VENUS_EVCHARGER_SERVICE_SETTLE_SECONDS": "0",
+                    "VENUS_EVCHARGER_ADAPTER_START_SECONDS": "0",
+                },
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            config_path = repo_copy / "deploy/venus/config.venus_evcharger.ini"
+            self.assertEqual(
+                validation_log.read_text(encoding="utf-8").splitlines(),
+                [
+                    f"observer --validate-config {config_path}",
+                    f"auto-input --validate-launch {config_path}",
+                ],
+            )
 
     @staticmethod
     def _make_executable(path: Path) -> None:

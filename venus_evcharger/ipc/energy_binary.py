@@ -17,7 +17,9 @@ from venus_evcharger.ipc.energy import (
     MeasuredValue,
 )
 
-_MAGIC = b"VEI3"
+_MAGIC = b"VEI4"
+_LEGACY_MAGIC = b"VEI3"
+_LEGACY_SCHEMA_VERSION = 3
 _MAX_PAYLOAD_BYTES = 65536
 _MAX_SOURCE_IDS = 64
 _HEADER = struct.Struct(">4sBQQdd")
@@ -46,6 +48,11 @@ _STATUS_TO_CODE: dict[EnergyValueStatus, int] = {
 _CODE_TO_STATUS: dict[int, EnergyValueStatus] = {
     code: status for status, code in _STATUS_TO_CODE.items()
 }
+_WIRE_SCHEMAS = {
+    _LEGACY_MAGIC: (_LEGACY_SCHEMA_VERSION, 4),
+    _MAGIC: (ENERGY_INPUTS_SCHEMA_VERSION, 7),
+}
+_EnergyHeader = tuple[bytes, int, int, int, float, float]
 
 
 def encode_energy_inputs(snapshot: EnergyInputsSnapshot) -> bytes:
@@ -66,6 +73,9 @@ def encode_energy_inputs(snapshot: EnergyInputsSnapshot) -> bytes:
         snapshot.pv_power_w,
         snapshot.battery_soc,
         snapshot.battery_net_power_w,
+        snapshot.battery_capacity_wh,
+        snapshot.battery_capacity_ah,
+        snapshot.battery_voltage_v,
     ):
         chunks.extend(_encode_measurement(measurement))
     payload = b"".join(chunks)
@@ -79,20 +89,49 @@ def decode_energy_inputs(payload: bytes) -> EnergyInputsSnapshot:
     if len(payload) > _MAX_PAYLOAD_BYTES:
         raise ValueError(_PAYLOAD_SIZE_ERROR)
     reader = _BinaryReader(payload)
+    header = reader.header()
+    measurement_count = _wire_measurement_count(header[0], header[1])
+    measurements = tuple(
+        _decode_measurement(reader) for _unused in range(measurement_count)
+    )
+    reader.require_complete()
+    return _decoded_energy_snapshot(header, _complete_measurements(measurements))
+
+
+def _wire_measurement_count(magic: bytes, schema_version: int) -> int:
+    """Validate one supported wire header and return its field count."""
+    try:
+        expected_schema, measurement_count = _WIRE_SCHEMAS[magic]
+    except KeyError as error:
+        raise ValueError(_INVALID_MAGIC_ERROR) from error
+    if schema_version != expected_schema:
+        raise ValueError(_UNSUPPORTED_SCHEMA_ERROR)
+    return measurement_count
+
+
+def _complete_measurements(
+    measurements: tuple[MeasuredValue, ...],
+) -> tuple[MeasuredValue, ...]:
+    """Pad legacy VEI3 measurements with the fields introduced by VEI4."""
+    missing_count = 7 - len(measurements)
+    return measurements + tuple(
+        _legacy_missing_measurement() for _unused in range(missing_count)
+    )
+
+
+def _decoded_energy_snapshot(
+    header: _EnergyHeader,
+    measurements: tuple[MeasuredValue, ...],
+) -> EnergyInputsSnapshot:
+    """Construct the semantic snapshot after wire validation is complete."""
     (
-        magic,
-        schema_version,
+        _magic,
+        _schema_version,
         sequence,
         topology_generation,
         captured_at,
         captured_monotonic,
-    ) = reader.header()
-    if magic != _MAGIC:
-        raise ValueError(_INVALID_MAGIC_ERROR)
-    if schema_version != ENERGY_INPUTS_SCHEMA_VERSION:
-        raise ValueError(_UNSUPPORTED_SCHEMA_ERROR)
-    measurements = tuple(_decode_measurement(reader) for _unused in range(4))
-    reader.require_complete()
+    ) = header
     return EnergyInputsSnapshot(
         sequence=sequence,
         captured_at=captured_at,
@@ -102,6 +141,22 @@ def decode_energy_inputs(payload: bytes) -> EnergyInputsSnapshot:
         pv_power_w=measurements[1],
         battery_soc=measurements[2],
         battery_net_power_w=measurements[3],
+        battery_capacity_wh=measurements[4],
+        battery_capacity_ah=measurements[5],
+        battery_voltage_v=measurements[6],
+    )
+
+
+def _legacy_missing_measurement() -> MeasuredValue:
+    """Supply fields that did not exist in the VEI3 payload."""
+    return MeasuredValue(
+        None,
+        0.0,
+        "unknown",
+        0.0,
+        (),
+        "not-observed",
+        observed_monotonic=0.0,
     )
 
 

@@ -23,7 +23,7 @@ from venus_evcharger.ipc.gateway_path_config import (
     configured_gateway_paths,
 )
 
-_SEMANTIC_GATEWAY_ALIAS = "victron"
+_SEMANTIC_GATEWAY_ALIASES = frozenset({"primary_battery", "victron"})
 _DEFAULT_PV_POLICY = PvProjectionPolicy()
 
 
@@ -325,7 +325,7 @@ def _split_energy_sources(
     gateway_source: EnergySourceDefinition | None = None
     external_sources: list[EnergySourceDefinition] = []
     for source in sources:
-        if source.source_id == _SEMANTIC_GATEWAY_ALIAS:
+        if source.source_id in _SEMANTIC_GATEWAY_ALIASES:
             gateway_source = source
             continue
         _validate_external_connector(source)

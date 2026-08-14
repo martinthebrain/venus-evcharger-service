@@ -89,6 +89,22 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                     "interval": 2.0,
                     "priority": "read",
                 },
+                "battery_capacity_ah": {
+                    "service": "",
+                    "prefix": "com.victronenergy.battery",
+                    "path": "/InstalledCapacity",
+                    "aggregate": "first-service",
+                    "interval": 300.0,
+                    "priority": "read",
+                },
+                "battery_voltage_v": {
+                    "service": "",
+                    "prefix": "com.victronenergy.battery",
+                    "path": "/Dc/0/Voltage",
+                    "aggregate": "first-service",
+                    "interval": 300.0,
+                    "priority": "read",
+                },
             },
         )
 
@@ -110,6 +126,10 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "AutoBatterySocPath": " /Soc ",
                 "AutoBatteryPowerService": " system.service ",
                 "AutoBatteryPowerPath": " /Battery/Power ",
+                "AutoBatteryCapacityWhPath": " /Capacity/Wh ",
+                "AutoBatteryCapacityAhPath": " /Capacity/Ah ",
+                "AutoBatteryVoltagePath": " /Battery/Voltage ",
+                "AutoBatteryScanIntervalSeconds": "2",
             }
         )
         specs = config.configured_read_specs(source)
@@ -151,6 +171,23 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "priority": "read",
             },
         )
+        for key, path in (
+            ("battery_capacity_wh", "/Capacity/Wh"),
+            ("battery_capacity_ah", "/Capacity/Ah"),
+            ("battery_voltage_v", "/Battery/Voltage"),
+        ):
+            with self.subTest(key=key):
+                self.assertEqual(
+                    specs[key],
+                    {
+                        "service": "battery.service",
+                        "prefix": "battery.prefix",
+                        "path": path,
+                        "aggregate": "",
+                        "interval": 5.0,
+                        "priority": "read",
+                    },
+                )
 
     def test_rate_timing_and_slo_defaults_and_clamps(self) -> None:
         self.assertEqual(config.rate_settings(defaults()), config.GatewayRateSettings(0.25, 0.35, 2.0))

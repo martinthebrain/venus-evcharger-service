@@ -35,17 +35,24 @@ class TestVenusServiceLifecycle(unittest.TestCase):
             stale_process = proc_root / "123"
             unrelated_process = proc_root / "456"
             managed_process = proc_root / "789"
+            rust_helper_process = proc_root / "790"
             live_supervisor = proc_root / "321"
             stale_process.mkdir(parents=True)
             unrelated_process.mkdir(parents=True)
             managed_process.mkdir(parents=True)
+            rust_helper_process.mkdir(parents=True)
             live_supervisor.mkdir(parents=True)
             (stale_process / "cwd").symlink_to(f"{script_dir}/service_venus_evcharger (deleted)")
             (unrelated_process / "cwd").symlink_to("/tmp/unrelated (deleted)")
             (managed_process / "cwd").symlink_to(script_dir)
+            (rust_helper_process / "cwd").symlink_to("/tmp")
             (live_supervisor / "cwd").symlink_to(script_dir / "service_venus_evcharger" / "log")
             (managed_process / "cmdline").write_bytes(
                 b"python3\0" + os.fsencode(root / "venus_evcharger_dbus_adapter.py") + b"\0/data/venus-evcharger/\0"
+            )
+            (rust_helper_process / "cmdline").write_bytes(
+                os.fsencode(root / "deploy/venus/bin/venus-evcharger-auto-input-helper")
+                + b"\0/config.ini\0/run/auto.json\0"
             )
             (unrelated_process / "cmdline").write_bytes(b"python3\0/tmp/unrelated.py\0")
             service_log = root / "service.log"
@@ -75,7 +82,7 @@ venus_reconcile_services
 
             self.assertEqual(
                 kill_log.read_text(encoding="utf-8").splitlines(),
-                ["123", "321", "789", "-KILL 123", "-KILL 321", "-KILL 789"],
+                ["123", "321", "789", "790", "-KILL 123", "-KILL 321", "-KILL 789", "-KILL 790"],
             )
             self.assertEqual(
                 service_log.read_text(encoding="utf-8").splitlines(),

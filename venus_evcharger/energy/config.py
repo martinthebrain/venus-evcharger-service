@@ -120,11 +120,52 @@ def _configured_source(defaults: Mapping[str, Any], source_id: str) -> EnergySou
     )
 
 
+def _legacy_gateway_source(defaults: Mapping[str, Any]) -> EnergySourceDefinition:
+    """Map global battery options to one transport-neutral gateway source."""
+    return EnergySourceDefinition(
+        source_id="primary_battery",
+        profile_name="semantic-gateway-battery",
+        role="battery",
+        usable_capacity_wh=_float_or_none(defaults.get("AutoBatteryCapacityWh")),
+        battery_chemistry=_text(
+            defaults.get("AutoBatteryChemistry"),
+            EnergySourceDefinition.battery_chemistry,
+        ).lower(),
+        capacity_auto_estimate=_bool(
+            defaults.get("AutoBatteryCapacityAutoEstimate"),
+            True,
+        ),
+        capacity_estimate_min_soc=max(
+            0.0,
+            _float_value(defaults.get("AutoBatteryCapacityEstimateMinSoc"), 95.0),
+        ),
+        capacity_startup_recheck_seconds=max(
+            0.0,
+            _float_value(
+                defaults.get("AutoBatteryCapacityStartupRecheckSeconds"),
+                300.0,
+            ),
+        ),
+        estimated_capacity_wh=_float_or_none(
+            defaults.get("AutoBatteryCapacityEstimatedWh")
+        ),
+        estimated_capacity_ah=_float_or_none(
+            defaults.get("AutoBatteryCapacityEstimatedAh")
+        ),
+        estimated_capacity_nominal_voltage_v=_float_or_none(
+            defaults.get("AutoBatteryCapacityEstimatedNominalVoltage")
+        ),
+        estimated_capacity_cell_count=_int_or_none(
+            defaults.get("AutoBatteryCapacityEstimatedCellCount")
+        ),
+    )
+
+
 def load_energy_source_definitions(defaults: Mapping[str, Any]) -> tuple[EnergySourceDefinition, ...]:
-    """Load explicitly configured external energy sources."""
+    """Load configured sources, including the implicit semantic gateway source."""
     configured_ids = _csv_items(defaults.get("AutoEnergySources"))
     if not configured_ids:
-        return ()
+        return (_legacy_gateway_source(defaults),)
     return tuple(_configured_source(defaults, source_id) for source_id in configured_ids)
 
 

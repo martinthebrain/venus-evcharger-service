@@ -16,6 +16,7 @@ from venus_evcharger.inputs.helper.contracts import (
 )
 from venus_evcharger.inputs.helper.external_contracts import (
     ExternalEnergyCycle,
+    GatewayBatteryMeasurements,
     ProjectedEnergyValue,
     PvProjectionPolicy,
     projection_measurement_status,
@@ -66,6 +67,9 @@ class AutoInputSources:
             "grid",
             "battery",
             "battery_power",
+            "battery_capacity_wh",
+            "battery_capacity_ah",
+            "battery_voltage",
         )
         self._measurements = {
             scope: self.gateway.measurement(scope)
@@ -100,8 +104,24 @@ class AutoInputSources:
         if not self.external.enabled:
             self._pv_projection = gateway_pv
             return
+        gateway_measurements = GatewayBatteryMeasurements(
+            soc=self._gateway_battery,
+            net_power=self._gateway_battery_power,
+            capacity_wh=self._valid_positive_measurement(
+                "battery_capacity_wh",
+                current_monotonic,
+            ),
+            capacity_ah=self._valid_positive_measurement(
+                "battery_capacity_ah",
+                current_monotonic,
+            ),
+            voltage_v=self._valid_positive_measurement(
+                "battery_voltage",
+                current_monotonic,
+            ),
+        )
         self._external_cycle = self.external.collect_cycle(
-            self._gateway_battery,
+            gateway_measurements,
             current_epoch,
         )
         self._battery_observed_at = self._external_cycle.battery_observed_at
@@ -172,6 +192,16 @@ class AutoInputSources:
             return None
         assert measurement.value is not None
         return measurement if 0.0 <= float(measurement.value) <= 100.0 else None
+
+    def _valid_positive_measurement(
+        self,
+        key: EnergyMeasurementKey,
+        current: float,
+    ) -> MeasuredValue | None:
+        measurement = self._valid_measurement(key, current)
+        if measurement is None or measurement.value is None:
+            return None
+        return measurement if float(measurement.value) > 0.0 else None
 
     def _external_battery_snapshot(self, measurement: MeasuredValue | None) -> Snapshot:
         if measurement is None:

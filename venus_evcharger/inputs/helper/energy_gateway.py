@@ -59,6 +59,9 @@ class GatewayEnergySnapshots:
             "grid": self._inputs.grid_power_w,
             "battery": self._inputs.battery_soc,
             "battery_power": self._inputs.battery_net_power_w,
+            "battery_capacity_wh": self._inputs.battery_capacity_wh,
+            "battery_capacity_ah": self._inputs.battery_capacity_ah,
+            "battery_voltage": self._inputs.battery_voltage_v,
         }.get(key)
 
     def request_refresh(

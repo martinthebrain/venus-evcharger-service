@@ -92,7 +92,10 @@ class ShellyWallboxService:
             config_path=ServiceStateFacade.config_path(),
             auto_input_helper_path=os.path.join(
                 os.path.dirname(os.path.realpath(__file__)),
-                "venus_evcharger_auto_input_helper.py",
+                "deploy",
+                "venus",
+                "bin",
+                "venus-evcharger-auto-input-helper",
             ),
         )
         self.controllers = ServiceControllerOwner(self, functions)

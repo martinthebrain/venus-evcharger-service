@@ -21,6 +21,7 @@ from venus_evcharger.inputs.helper.config_runtime import load_auto_input_helper_
 from venus_evcharger.inputs.helper.external_contracts import (
     ExternalPollingPolicy,
     ExternalSourcePoll,
+    GatewayBatteryMeasurements,
     ProjectedEnergyValue,
     PvProjectionPolicy,
 )
@@ -517,7 +518,7 @@ class ExternalEnergyPayloadContractTests(unittest.TestCase):
         with patch("venus_evcharger.inputs.helper.external_sources.ExternalSourceScheduler", return_value=scheduler), patch.multiple(
             "venus_evcharger.inputs.helper.external_sources",
             aggregate_energy_sources=aggregate,
-            _gateway_battery_source=gateway_projection,
+            gateway_battery_source=gateway_projection,
             update_energy_learning_profiles=learning,
             summarize_energy_learning_profiles=learning_summary,
             derive_discharge_balance_metrics=balance_metrics,
@@ -539,10 +540,17 @@ class ExternalEnergyPayloadContractTests(unittest.TestCase):
                     polling_policy=ExternalPollingPolicy(),
                     pv_policy=PvProjectionPolicy("external_only", "external"),
                 )
-                cycle = sources.collect_cycle(gateway_value, 20.0)
+                gateway_measurements = GatewayBatteryMeasurements(
+                    soc=gateway_value
+                )
+                cycle = sources.collect_cycle(gateway_measurements, 20.0)
 
         scheduler.poll.assert_called_once_with(20.0)
-        gateway_projection.assert_called_once_with(gateway_value, "victron", None)
+        gateway_projection.assert_called_once_with(
+            gateway_measurements,
+            "victron",
+            None,
+        )
         aggregate.assert_called_once_with((external, gateway_source))
         learning.assert_called_once_with({}, (external,), 20.0)
         learning_summary.assert_called_once_with(profiles)

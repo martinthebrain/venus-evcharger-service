@@ -332,6 +332,42 @@ class GatewayEnergySnapshotContracts(unittest.TestCase):
         self.assertEqual(snapshot.pv_power_w.status, "unavailable")
         self.assertEqual(snapshot.pv_power_w.reason_code, "source-unavailable")
 
+    def test_non_positive_battery_metadata_is_rejected_at_the_gateway_boundary(self) -> None:
+        snapshot = energy_inputs_snapshot(
+            {
+                "battery_capacity_wh": {
+                    "value": 0.0,
+                    "confirmed_at": 9.0,
+                    "confirmed_monotonic": 9.0,
+                    "status": "fresh",
+                    "confidence": 1.0,
+                },
+                "battery_capacity_ah": {
+                    "value": -100.0,
+                    "confirmed_at": 9.0,
+                    "confirmed_monotonic": 9.0,
+                    "status": "fresh",
+                    "confidence": 1.0,
+                },
+            },
+            self.discovery,
+            sequence=1,
+            captured_at=10.0,
+            captured_monotonic=10.0,
+        )
+
+        for measurement in (
+            snapshot.battery_capacity_wh,
+            snapshot.battery_capacity_ah,
+        ):
+            with self.subTest(measurement=measurement):
+                self.assertIsNone(measurement.value)
+                self.assertEqual(measurement.status, "unavailable")
+                self.assertEqual(measurement.reason_code, "invalid-non-positive")
+                self.assertEqual(measurement.observed_at, 0.0)
+                self.assertEqual(measurement.observed_monotonic, 0.0)
+                self.assertEqual(measurement.confidence, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

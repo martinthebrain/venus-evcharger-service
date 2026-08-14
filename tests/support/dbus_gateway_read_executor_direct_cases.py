@@ -238,7 +238,14 @@ class GatewayReadExecutorDirectCases(GatewayAdapterContractCase):
             request = EnergyRefreshRequest("battery-source", "energy_source", 0.0, source_id=source_id)
 
             self.assertEqual(run_non_write_command(adapter, request.to_command(source="test")), "applied")
-            force_due.assert_called_once_with(("battery_soc", "battery_net_power_w"))
+            force_due.assert_called_once_with(
+                (
+                    "battery_soc",
+                    "battery_net_power_w",
+                    "battery_capacity_ah",
+                    "battery_voltage_v",
+                )
+            )
             unknown = EnergyRefreshRequest("missing-source", "energy_source", 0.0, source_id="unknown")
             self.assertEqual(run_non_write_command(adapter, unknown.to_command(source="test")), "dropped")
             self.assertEqual(

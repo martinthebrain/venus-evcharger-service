@@ -55,6 +55,9 @@ def _snapshot() -> EnergyInputsSnapshot:
         pv_power_w=_measurement(0.0, status="stale", source_ids=("pv-ac", "pv-dc"), reason_code="night"),
         battery_soc=_measurement(None, status="unavailable", source_ids=(), reason_code="missing"),
         battery_net_power_w=_measurement(-250.0, source_ids=("battery",)),
+        battery_capacity_wh=_measurement(5_120.0, source_ids=("battery",)),
+        battery_capacity_ah=_measurement(100.0, source_ids=("battery",)),
+        battery_voltage_v=_measurement(52.8, source_ids=("battery",)),
     )
 
 
@@ -70,7 +73,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         snapshot = _snapshot()
         encoded = binary.encode_energy_inputs(snapshot)
 
-        self.assertEqual(encoded[:4], b"VEI3")
+        self.assertEqual(encoded[:4], b"VEI4")
         self.assertEqual(binary.decode_energy_inputs(encoded), snapshot)
         self.assertLess(len(encoded), len(str(snapshot.to_payload()).encode()))
 
@@ -84,8 +87,36 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
             pv_power_w=MeasuredValue(None, 0.0, "unavailable", 0.0, (), "", observed_monotonic=0.0),
             battery_soc=MeasuredValue(6.0, 7.0, "error", 0.25, (), "", observed_monotonic=7.0),
             battery_net_power_w=MeasuredValue(-8.0, 7.0, "fresh", 0.75, (), "", observed_monotonic=8.0),
+            battery_capacity_wh=MeasuredValue(9.0, 7.0, "fresh", 1.0, (), "", observed_monotonic=8.0),
+            battery_capacity_ah=MeasuredValue(10.0, 7.0, "fresh", 1.0, (), "", observed_monotonic=8.0),
+            battery_voltage_v=MeasuredValue(11.0, 7.0, "fresh", 1.0, (), "", observed_monotonic=8.0),
         )
         expected = b"".join(
+            (
+                struct.pack(">4sBQQdd", b"VEI4", 4, 1, 3, 7.0, 8.0),
+                struct.pack(">BBddddH", 0, 1, 4.0, 5.0, 6.0, 0.5, 0),
+                b"\x00\x00",
+                struct.pack(">BBddddH", 2, 0, 0.0, 0.0, 0.0, 0.0, 0),
+                b"\x00\x00",
+                struct.pack(">BBddddH", 3, 1, 6.0, 7.0, 7.0, 0.25, 0),
+                b"\x00\x00",
+                struct.pack(">BBddddH", 0, 1, -8.0, 7.0, 8.0, 0.75, 0),
+                b"\x00\x00",
+                struct.pack(">BBddddH", 0, 1, 9.0, 7.0, 8.0, 1.0, 0),
+                b"\x00\x00",
+                struct.pack(">BBddddH", 0, 1, 10.0, 7.0, 8.0, 1.0, 0),
+                b"\x00\x00",
+                struct.pack(">BBddddH", 0, 1, 11.0, 7.0, 8.0, 1.0, 0),
+                b"\x00\x00",
+            )
+        )
+
+        with patch.object(binary, "_MAX_PAYLOAD_BYTES", len(expected)):
+            self.assertEqual(binary.encode_energy_inputs(snapshot), expected)
+            self.assertEqual(binary.decode_energy_inputs(expected), snapshot)
+
+    def test_vei3_payload_remains_readable_with_explicit_missing_capacity(self) -> None:
+        legacy = b"".join(
             (
                 struct.pack(">4sBQQdd", b"VEI3", 3, 1, 3, 7.0, 8.0),
                 struct.pack(">BBddddH", 0, 1, 4.0, 5.0, 6.0, 0.5, 0),
@@ -99,9 +130,18 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
             )
         )
 
-        with patch.object(binary, "_MAX_PAYLOAD_BYTES", len(expected)):
-            self.assertEqual(binary.encode_energy_inputs(snapshot), expected)
-            self.assertEqual(binary.decode_energy_inputs(expected), snapshot)
+        decoded = binary.decode_energy_inputs(legacy)
+
+        self.assertEqual(decoded.schema_version, 4)
+        self.assertEqual(decoded.grid_power_w.value, 4.0)
+        for measurement in (
+            decoded.battery_capacity_wh,
+            decoded.battery_capacity_ah,
+            decoded.battery_voltage_v,
+        ):
+            self.assertIsNone(measurement.value)
+            self.assertEqual(measurement.status, "unknown")
+            self.assertEqual(measurement.reason_code, "not-observed")
 
     def test_atomic_file_load_enforces_age_and_supports_unbounded_reads(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -159,7 +199,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         cases = (
             b"",
             b"bad!" + encoded[4:],
-            encoded[:4] + b"\x04" + encoded[5:],
+            encoded[:4] + b"\x05" + encoded[5:],
             encoded[:-1],
             encoded + b"x",
             encoded[: binary._HEADER.size] + b"\xff" + encoded[binary._HEADER.size + 1 :],
@@ -176,7 +216,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
         cases = (
             (b"x" * 65537, binary._PAYLOAD_SIZE_ERROR),
             (b"bad!" + encoded[4:], binary._INVALID_MAGIC_ERROR),
-            (encoded[:4] + b"\x04" + encoded[5:], binary._UNSUPPORTED_SCHEMA_ERROR),
+            (encoded[:4] + b"\x05" + encoded[5:], binary._UNSUPPORTED_SCHEMA_ERROR),
             (
                 encoded[: binary._HEADER.size] + b"\xff" + encoded[binary._HEADER.size + 1 :],
                 binary._INVALID_STATUS_ERROR,
@@ -319,7 +359,7 @@ class EnergyBinaryIpcContractTests(unittest.TestCase):
     def test_gateway_client_prefers_split_snapshots_and_falls_back_to_canonical_json(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             paths = gateway_paths(str(Path(temp_dir) / "run"))
-            self.assertEqual(paths.energy_inputs_path, str(Path(paths.run_dir) / "energy-inputs.v3.bin"))
+            self.assertEqual(paths.energy_inputs_path, str(Path(paths.run_dir) / "energy-inputs.v4.bin"))
             self.assertEqual(paths.energy_topology_path, str(Path(paths.run_dir) / "energy-topology.json"))
             captured_at = time.time()
             inputs = replace(

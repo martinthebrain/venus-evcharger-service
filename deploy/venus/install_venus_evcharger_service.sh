@@ -28,7 +28,7 @@ BOOT_HELPER="$SCRIPT_DIR/boot_venus_evcharger_service.sh"
 MAIN_ENTRYPOINT="$REPO_DIR/venus_evcharger_service.py"
 DBUS_ADAPTER_ENTRYPOINT="$REPO_DIR/venus_evcharger_dbus_adapter.py"
 OBSERVER_ENTRYPOINT="$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer"
-AUTO_INPUT_HELPER="$REPO_DIR/venus_evcharger_auto_input_helper.py"
+AUTO_INPUT_HELPER="$REPO_DIR/deploy/venus/bin/venus-evcharger-auto-input-helper"
 CONFIGURE_HELPER="$SCRIPT_DIR/configure_venus_evcharger_service.sh"
 RESTART_HELPER="$SCRIPT_DIR/restart_venus_evcharger_service.sh"
 RESET_CONFIG_HELPER="$SCRIPT_DIR/reset_venus_evcharger_config.sh"
@@ -52,6 +52,11 @@ if [ ! -f "$OBSERVER_ENTRYPOINT" ]; then
 	exit 1
 fi
 
+if [ ! -f "$AUTO_INPUT_HELPER" ]; then
+	echo "Rust auto input helper binary not found: $AUTO_INPUT_HELPER" >&2
+	exit 1
+fi
+
 # Restore execute bits for all directly launched entrypoints.
 chmod a+x "$MAIN_ENTRYPOINT"
 chmod 755 "$MAIN_ENTRYPOINT"
@@ -66,10 +71,8 @@ if [ -f "$GENERIC_SHELLY_HELPER" ]; then
 	chmod 755 "$GENERIC_SHELLY_HELPER"
 fi
 
-if [ -f "$AUTO_INPUT_HELPER" ]; then
-	chmod a+x "$AUTO_INPUT_HELPER"
-	chmod 755 "$AUTO_INPUT_HELPER"
-fi
+chmod a+x "$AUTO_INPUT_HELPER"
+chmod 755 "$AUTO_INPUT_HELPER"
 
 chmod a+x "$OBSERVER_ENTRYPOINT"
 chmod 755 "$OBSERVER_ENTRYPOINT"
@@ -81,6 +84,10 @@ case "$(uname -m)" in
 arm* | aarch64)
 	if ! "$OBSERVER_ENTRYPOINT" --validate-config "$CONFIG_PATH"; then
 		echo "Rust forensic observer rejected the active configuration." >&2
+		exit 1
+	fi
+	if ! "$AUTO_INPUT_HELPER" --validate-launch "$CONFIG_PATH"; then
+		echo "Rust auto input helper rejected the active launch configuration." >&2
 		exit 1
 	fi
 	;;
