@@ -27,6 +27,8 @@ class RuntimeSupportController:
         service: Any,
         age_seconds_func: AgeSeconds,
         health_code_func: HealthCode,
+        *,
+        script_path: str = "",
     ) -> None:
         self.service = service
         service._readback_store = InMemoryReadbackStore()
@@ -35,7 +37,13 @@ class RuntimeSupportController:
         self.control_commands = ControlCommandQueue(service)
         self.executor = RuntimeExecutor(service, self.control_commands)
         self.mainloop_watchdog = MainloopWatchdog(service)
-        self.setup = RuntimeSetup(service, health_code_func, self.state, self.async_state)
+        self.setup = RuntimeSetup(
+            service,
+            health_code_func,
+            self.state,
+            self.async_state,
+            script_path=script_path,
+        )
         self.audit_fields = RuntimeAuditFields()
         self.audit = RuntimeAuditLogger(service, self.audit_fields, self.state)
         self.health = RuntimeHealthMonitor(service, age_seconds_func, self.state)
