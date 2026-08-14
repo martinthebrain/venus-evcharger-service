@@ -756,7 +756,15 @@ class _EnergyAggregateProfileCases:
             }
         )
         self.assertTrue(use_combined)
-        self.assertEqual(legacy_sources, ())
+        self.assertEqual(len(legacy_sources), 1)
+        legacy = legacy_sources[0]
+        self.assertEqual(legacy.source_id, "primary_battery")
+        self.assertEqual(legacy.profile_name, "semantic-gateway-battery")
+        self.assertEqual(legacy.connector_type, "")
+        self.assertEqual(legacy.service_name, "")
+        self.assertEqual(legacy.usable_capacity_wh, 5120.0)
+        self.assertEqual(legacy.estimated_capacity_wh, 4800.0)
+        self.assertEqual(legacy.estimated_capacity_ah, 100.0)
 
         configured_sources, use_combined = load_energy_source_settings(
             {

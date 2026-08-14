@@ -16,6 +16,7 @@ cleanup_unwanted_paths() {
 	rm -f "${cleanup_root}"/venus_evcharger/dbus_adapter_*.py
 	rm -f "${cleanup_root}/venus_evcharger_dbus_introspection_worker.py"
 	rm -f "${cleanup_root}/venus_evcharger_observer.py"
+	rm -f "${cleanup_root}/venus_evcharger_auto_input_helper.py"
 }
 
 copy_item() {
@@ -90,7 +91,6 @@ managed_layout_paths() {
 		version.txt \
 		venus_evcharger_service.py \
 		venus_evcharger_dbus_adapter.py \
-		venus_evcharger_auto_input_helper.py \
 		venus_evchargerctl.py \
 		deploy/venus \
 		venus_evcharger \
@@ -131,7 +131,6 @@ write_managed_layout() {
 	chmod 755 "${destination_root}/install.sh" 2>/dev/null || true
 	chmod 755 "${destination_root}/venus_evcharger_service.py" 2>/dev/null || true
 	chmod 755 "${destination_root}/venus_evcharger_dbus_adapter.py" 2>/dev/null || true
-	chmod 755 "${destination_root}/venus_evcharger_auto_input_helper.py" 2>/dev/null || true
 	chmod 755 "${destination_root}/venus_evchargerctl.py" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/install_venus_evcharger_service.sh" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/boot_venus_evcharger_service.sh" 2>/dev/null || true
@@ -145,6 +144,7 @@ write_managed_layout() {
 	chmod 755 "${destination_root}/deploy/venus/service_venus_evcharger_observer/run" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/service_venus_evcharger_observer/log/run" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/bin/venus-evcharger-forensic-observer" 2>/dev/null || true
+	chmod 755 "${destination_root}/deploy/venus/bin/venus-evcharger-auto-input-helper" 2>/dev/null || true
 }
 
 promote_target_layout() {
@@ -256,10 +256,10 @@ deployment_sentinel_paths() {
 		install.sh \
 		venus_evcharger_service.py \
 		venus_evcharger_dbus_adapter.py \
-		venus_evcharger_auto_input_helper.py \
 		venus_evcharger/dbus_adapter/process/adapter.py \
 		venus_evcharger/core/contracts_bootstrap.py \
 		deploy/venus/bin/venus-evcharger-forensic-observer \
+		deploy/venus/bin/venus-evcharger-auto-input-helper \
 		deploy/venus/service_venus_evcharger/run \
 		deploy/venus/service_venus_evcharger/log/run \
 		deploy/venus/service_venus_evcharger_dbus_adapter/run \

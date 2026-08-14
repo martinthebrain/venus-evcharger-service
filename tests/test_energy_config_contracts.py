@@ -72,7 +72,7 @@ class EnergyConfigContractTests(unittest.TestCase):
         for value in ("0", "false", "no", "off", "unexpected", ""):
             self.assertFalse(_bool(value, True))
 
-    def test_unconfigured_sources_do_not_create_an_implicit_dbus_source(self) -> None:
+    def test_legacy_battery_options_create_a_transport_neutral_gateway_source(self) -> None:
         raw_dbus_defaults = {
             "AutoBatteryService": "com.victronenergy.battery.legacy",
             "AutoBatteryServicePrefix": "com.victronenergy.battery",
@@ -80,8 +80,19 @@ class EnergyConfigContractTests(unittest.TestCase):
             "AutoUseCombinedBatterySoc": "no",
         }
 
-        self.assertEqual(load_energy_source_definitions(raw_dbus_defaults), ())
-        self.assertEqual(load_energy_source_settings(raw_dbus_defaults), ((), False))
+        definitions = load_energy_source_definitions(raw_dbus_defaults)
+        self.assertEqual(len(definitions), 1)
+        source = definitions[0]
+        self.assertEqual(source.source_id, "primary_battery")
+        self.assertEqual(source.profile_name, "semantic-gateway-battery")
+        self.assertEqual(source.role, "battery")
+        self.assertEqual(source.connector_type, "")
+        self.assertEqual(source.service_name, "")
+        self.assertEqual(source.config_path, "")
+        self.assertEqual(
+            load_energy_source_settings(raw_dbus_defaults),
+            (definitions, False),
+        )
 
     def test_missing_profile_values_preserve_definition_defaults(self) -> None:
         self.assertEqual(_profile_text({}, "missing"), "")

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import KW_ONLY, dataclass
+from dataclasses import KW_ONLY, dataclass, field
 
 from venus_evcharger.ipc.energy_types import (
     ENERGY_INPUTS_SCHEMA_VERSION,
@@ -106,6 +106,9 @@ class EnergyInputsSnapshot:
     pv_power_w: MeasuredValue
     battery_soc: MeasuredValue
     battery_net_power_w: MeasuredValue
+    battery_capacity_wh: MeasuredValue = field(default_factory=lambda: _unobserved_measurement())
+    battery_capacity_ah: MeasuredValue = field(default_factory=lambda: _unobserved_measurement())
+    battery_voltage_v: MeasuredValue = field(default_factory=lambda: _unobserved_measurement())
     schema_version: int = ENERGY_INPUTS_SCHEMA_VERSION
     _: KW_ONLY
     captured_monotonic: float
@@ -128,6 +131,9 @@ class EnergyInputsSnapshot:
             ("pv_power_w", self.pv_power_w),
             ("battery_soc", self.battery_soc),
             ("battery_net_power_w", self.battery_net_power_w),
+            ("battery_capacity_wh", self.battery_capacity_wh),
+            ("battery_capacity_ah", self.battery_capacity_ah),
+            ("battery_voltage_v", self.battery_voltage_v),
         ):
             if not isinstance(measurement, MeasuredValue):
                 raise TypeError(f"energy inputs {name} must be a MeasuredValue")
@@ -147,6 +153,9 @@ class EnergyInputsSnapshot:
             "pv_power_w": self.pv_power_w.to_payload(),
             "battery_soc": self.battery_soc.to_payload(),
             "battery_net_power_w": self.battery_net_power_w.to_payload(),
+            "battery_capacity_wh": self.battery_capacity_wh.to_payload(),
+            "battery_capacity_ah": self.battery_capacity_ah.to_payload(),
+            "battery_voltage_v": self.battery_voltage_v.to_payload(),
         }
 
     @classmethod
@@ -167,6 +176,9 @@ class EnergyInputsSnapshot:
             pv_power_w=MeasuredValue.from_payload(item["pv_power_w"]),
             battery_soc=MeasuredValue.from_payload(item["battery_soc"]),
             battery_net_power_w=MeasuredValue.from_payload(item["battery_net_power_w"]),
+            battery_capacity_wh=MeasuredValue.from_payload(item["battery_capacity_wh"]),
+            battery_capacity_ah=MeasuredValue.from_payload(item["battery_capacity_ah"]),
+            battery_voltage_v=MeasuredValue.from_payload(item["battery_voltage_v"]),
         )
 
 
@@ -192,10 +204,26 @@ def _snapshot_mapping(payload: object, label: str) -> Mapping[str, object]:
             "pv_power_w",
             "battery_soc",
             "battery_net_power_w",
+            "battery_capacity_wh",
+            "battery_capacity_ah",
+            "battery_voltage_v",
         }
     )
     exact_fields(item, required=required, label=label)
     return item
+
+
+def _unobserved_measurement() -> MeasuredValue:
+    """Return the canonical value for a field absent from an older wire snapshot."""
+    return MeasuredValue(
+        None,
+        0.0,
+        "unknown",
+        0.0,
+        (),
+        "not-observed",
+        observed_monotonic=0.0,
+    )
 
 
 def _descriptor_tuple(value: object) -> tuple[EnergySourceDescriptor, ...]:

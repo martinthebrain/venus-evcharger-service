@@ -9,6 +9,7 @@ from typing import Literal
 
 from venus_evcharger.energy.models import EnergySourceSnapshot
 from venus_evcharger.inputs.helper.contracts import Snapshot
+from venus_evcharger.ipc.energy import MeasuredValue
 
 PvSourcePolicyName = Literal[
     "gateway_only",
@@ -42,6 +43,50 @@ class PvProjectionPolicy:
 
     name: PvSourcePolicyName = "gateway_preferred"
     external_source_id: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayBatteryMeasurements:
+    """Transport-neutral battery measurements supplied by the gateway."""
+
+    soc: MeasuredValue | None = None
+    net_power: MeasuredValue | None = None
+    capacity_wh: MeasuredValue | None = None
+    capacity_ah: MeasuredValue | None = None
+    voltage_v: MeasuredValue | None = None
+
+    @property
+    def primary(self) -> MeasuredValue | None:
+        """Return the best observation for source identity and timestamps."""
+        return next(
+            (
+                measurement
+                for measurement in (
+                    self.soc,
+                    self.net_power,
+                    self.capacity_wh,
+                    self.capacity_ah,
+                    self.voltage_v,
+                )
+                if measurement is not None and measurement.value is not None
+            ),
+            None,
+        )
+
+    @property
+    def available(self) -> tuple[MeasuredValue, ...]:
+        """Return all measurements present in this coherent gateway view."""
+        return tuple(
+            measurement
+            for measurement in (
+                self.soc,
+                self.net_power,
+                self.capacity_wh,
+                self.capacity_ah,
+                self.voltage_v,
+            )
+            if measurement is not None and measurement.value is not None
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +220,7 @@ __all__ = [
     "ExternalEnergyCycle",
     "ExternalPollingPolicy",
     "ExternalSourcePoll",
+    "GatewayBatteryMeasurements",
     "PV_SOURCE_POLICIES",
     "ProjectedEnergyValue",
     "ProjectionMeasurementStatus",

@@ -231,7 +231,17 @@ class DbusEnergyDiscoveryManager:
 
     def _battery_descriptors(self) -> list[EnergySourceDescriptor]:
         spec = self._specs.get("battery_soc", {})
-        capabilities = ("soc", "net_power") if self._battery_power_configured() else ("soc",)
+        capabilities = tuple(
+            capability
+            for capability, key in (
+                ("soc", "battery_soc"),
+                ("net_power", "battery_net_power_w"),
+                ("capacity_wh", "battery_capacity_wh"),
+                ("capacity_ah", "battery_capacity_ah"),
+                ("voltage", "battery_voltage_v"),
+            )
+            if key in self._specs
+        )
         return [
             EnergySourceDescriptor(
                 source_id=opaque_energy_source_id("battery", service),
@@ -248,10 +258,16 @@ class DbusEnergyDiscoveryManager:
 
     def _read_keys_for_kind(self, kind: EnergySourceKind) -> tuple[str, ...]:
         if kind == "battery":
-            return (
-                ("battery_soc", "battery_net_power_w")
-                if self._battery_power_configured()
-                else ("battery_soc",)
+            return tuple(
+                key
+                for key in (
+                    "battery_soc",
+                    "battery_net_power_w",
+                    "battery_capacity_wh",
+                    "battery_capacity_ah",
+                    "battery_voltage_v",
+                )
+                if key in self._specs
             )
         return _read_keys_for_kind(kind)
 
@@ -278,32 +294,53 @@ class DbusEnergyDiscoveryManager:
 
     def _battery_introspection_targets(self) -> list[IntrospectionTarget]:
         spec = self._specs.get("battery_soc", {})
-        path = read_spec_text(spec, "path")
-        targets = [
-            IntrospectionTarget(
-                service,
-                path,
-                70,
-                "battery",
-                "discovered-battery-field",
+        targets = self._targets_for_services(
+            spec,
+            priority=70,
+            reason="discovered-battery-field",
+        )
+        targets.extend(
+            self._targets_for_services(
+                self._specs.get("battery_net_power_w", {}),
+                priority=70,
+                reason="configured-battery-power-field",
             )
-            for service in self.services_for(spec)
-            if path
-        ]
-        power_spec = self._specs.get("battery_net_power_w", {})
-        power_service = read_spec_text(power_spec, "service")
-        power_path = read_spec_text(power_spec, "path")
-        if power_service and power_path:
-            targets.append(
-                IntrospectionTarget(
-                    power_service,
-                    power_path,
-                    70,
-                    "battery",
-                    "configured-battery-power-field",
+        )
+        for key, reason in (
+            ("battery_capacity_wh", "configured-battery-capacity-wh-field"),
+            ("battery_capacity_ah", "configured-battery-capacity-ah-field"),
+            ("battery_voltage_v", "configured-battery-voltage-field"),
+        ):
+            targets.extend(
+                self._targets_for_services(
+                    self._specs.get(key, {}),
+                    priority=95,
+                    reason=reason,
                 )
             )
         return targets
+
+    def _targets_for_services(
+        self,
+        spec: ReadSpec,
+        *,
+        priority: int,
+        reason: str,
+    ) -> list[IntrospectionTarget]:
+        """Build private targets for every service selected by one read spec."""
+        path = read_spec_text(spec, "path")
+        if not path:
+            return []
+        return [
+            IntrospectionTarget(
+                service,
+                path,
+                priority,
+                "battery",
+                reason,
+            )
+            for service in self.services_for(spec)
+        ]
 
     def _pv_introspection_targets(self) -> list[IntrospectionTarget]:
         spec = self._specs.get("pv_power_w", {})

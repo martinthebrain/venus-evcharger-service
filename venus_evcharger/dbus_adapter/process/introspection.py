@@ -20,16 +20,17 @@ from venus_evcharger.dbus_adapter.contracts import (
 )
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionContext
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter.read.keys import SEMANTIC_ENERGY_READ_KEYS
 from venus_evcharger.dbus_gateway_core import float_or_default, float_or_zero
 from venus_evcharger.ipc.command_types import CommandMapping
 from venus_evcharger.ipc.energy import ENERGY_REFRESH_COMMAND_KIND, EnergyRefreshRequest
 
 OPTIONAL_INTROSPECTION_PRIORITY_MIN = 90
 ENERGY_REFRESH_KEYS_BY_SCOPE: dict[str, tuple[str, ...]] = {
-    "all": ("grid_power_w", "pv_power_w", "battery_soc", "battery_net_power_w"),
+    "all": SEMANTIC_ENERGY_READ_KEYS,
     "grid": ("grid_power_w",),
     "pv": ("pv_power_w",),
-    "battery": ("battery_soc", "battery_net_power_w"),
+    "battery": tuple(key for key in SEMANTIC_ENERGY_READ_KEYS if key.startswith("battery_")),
 }
 
 
@@ -165,7 +166,8 @@ class DbusAdapterIntrospection:
     ) -> tuple[str, ...]:
         fixed_keys = ENERGY_REFRESH_KEYS_BY_SCOPE.get(request.scope)
         if fixed_keys is not None:
-            return fixed_keys
+            configured = self._context.read_scheduler.specs
+            return tuple(key for key in fixed_keys if key in configured)
         source_id = request.source_id
         if source_id is None:
             return ()

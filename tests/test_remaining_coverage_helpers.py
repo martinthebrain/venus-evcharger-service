@@ -223,7 +223,7 @@ class RemainingCoverageHelperTests(unittest.TestCase):
             empty_id_harness.spawn_helper(now=1.0)
         self.assertEqual(empty_id_service._auto_input_runtime_instance_id, "instance-x")
         command = popen.call_args.args[0]
-        self.assertEqual(command[2:4], ["/helper.py", "/config.ini"])
+        self.assertEqual(command[:2], ["/helper.py", "/config.ini"])
 
     def test_supervisor_orphan_helper_process_paths(self) -> None:
         harness = _auto_input_supervisor(

@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import sys
 import uuid
 
 from venus_evcharger.inputs.supervisor_contracts import (
@@ -85,8 +84,6 @@ class AutoInputProcessLifecycle:
     def _helper_command(self, generation: int) -> list[str]:
         svc = self._service
         return [
-            sys.executable,
-            "-u",
             self._helper_path,
             self._config_path,
             svc.auto_input_snapshot_path,
@@ -180,7 +177,12 @@ class AutoInputProcessLifecycle:
                 cmdline = AutoInputProcessLifecycle._normalized_helper_cmdline(handle.read())
         except OSError:
             return False
-        return "venus_evcharger_auto_input_helper.py" in cmdline and snapshot_path in cmdline
+        helper_names = (
+            # Recognize pre-Rust helpers so upgrades can terminate stale processes.
+            "venus_evcharger_auto_input_helper.py",
+            "venus-evcharger-auto-input-helper",
+        )
+        return any(name in cmdline for name in helper_names) and snapshot_path in cmdline
 
     @staticmethod
     def _normalized_helper_cmdline(payload: bytes) -> str:

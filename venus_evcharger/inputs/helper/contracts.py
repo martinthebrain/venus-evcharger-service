@@ -16,7 +16,15 @@ from venus_evcharger.ipc.energy import (
 from venus_evcharger.ipc.enqueue_result import GatewayEnqueueResult
 
 Snapshot: TypeAlias = dict[str, object]
-EnergyMeasurementKey = Literal["pv", "grid", "battery", "battery_power"]
+EnergyMeasurementKey = Literal[
+    "pv",
+    "grid",
+    "battery",
+    "battery_power",
+    "battery_capacity_wh",
+    "battery_capacity_ah",
+    "battery_voltage",
+]
 
 
 @runtime_checkable

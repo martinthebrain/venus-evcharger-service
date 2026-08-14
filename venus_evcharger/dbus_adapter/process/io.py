@@ -9,7 +9,7 @@ is intentionally isolated to the gateway adapter modules only.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from typing import TypeGuard, TypeVar
 
 from venus_evcharger.dbus_adapter.async_broker import DbusMethodCall, dbus_call_operation
@@ -17,7 +17,7 @@ from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
 from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
-from venus_evcharger.dbus_adapter.read.keys import CORE_ENERGY_READ_KEYS
+from venus_evcharger.dbus_adapter.read.keys import CORE_ENERGY_READ_KEYS, SEMANTIC_ENERGY_READ_KEYS
 from venus_evcharger.dbus_adapter.read.semantic import energy_inputs_snapshot
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec, read_spec_stale_after_seconds
 from venus_evcharger.ipc.energy import EnergyTopologySnapshot
@@ -187,14 +187,9 @@ class DbusAdapterIo:
             context._last_energy_publish_monotonic,
             context.energy_publish_interval_seconds,
         ):
-            values = {
+            values: dict[str, Mapping[str, object]] = {
                 key: dict(context.cache.values.get(key, {}))
-                for key in (
-                    "grid_power_w",
-                    "pv_power_w",
-                    "battery_soc",
-                    "battery_net_power_w",
-                )
+                for key in SEMANTIC_ENERGY_READ_KEYS
             }
             sequence = context.cache.sequence
             snapshot_captured_at = time.time()

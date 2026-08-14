@@ -63,7 +63,7 @@ def _expected_paths(root: Path) -> GatewayPaths:
         cache_path=str(root / "cache/custom-cache.json"),
         cache_sequence_path=str(root / "run/dbus-cache.seq"),
         health_path=str(root / "health/custom-health.json"),
-        energy_inputs_path=str(root / "run/energy-inputs.v3.bin"),
+        energy_inputs_path=str(root / "run/energy-inputs.v4.bin"),
         energy_topology_path=str(root / "run/energy-topology.json"),
         command_dir=str(root / "queues/gateway"),
         core_command_dir=str(root / "queues/core"),

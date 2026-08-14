@@ -228,7 +228,6 @@ require_source_layout() {
 	src_dir="$1"
 	[ -f "${src_dir}/install.sh" ] || return 1
 	[ -f "${src_dir}/venus_evcharger_service.py" ] || return 1
-	[ -f "${src_dir}/venus_evcharger_auto_input_helper.py" ] || return 1
 	[ -f "${src_dir}/deploy/venus/install_venus_evcharger_service.sh" ] || return 1
 	[ -f "${src_dir}/deploy/venus/service_lifecycle.sh" ] || return 1
 	[ -f "${src_dir}/deploy/venus/service_venus_evcharger/run" ] || return 1
@@ -236,6 +235,7 @@ require_source_layout() {
 	[ -f "${src_dir}/deploy/venus/service_venus_evcharger_observer/run" ] || return 1
 	[ -f "${src_dir}/deploy/venus/service_venus_evcharger_observer/log/run" ] || return 1
 	[ -f "${src_dir}/deploy/venus/bin/venus-evcharger-forensic-observer" ] || return 1
+	[ -f "${src_dir}/deploy/venus/bin/venus-evcharger-auto-input-helper" ] || return 1
 	[ -d "${src_dir}/venus_evcharger" ] || return 1
 	return 0
 }

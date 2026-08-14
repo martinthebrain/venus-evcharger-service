@@ -35,6 +35,18 @@ def energy_inputs_snapshot(
         ),
         battery_soc=_measurement(values.get("battery_soc"), discovery.source_ids("battery")),
         battery_net_power_w=_semantic_battery_power(native_battery_power),
+        battery_capacity_wh=_positive_measurement(
+            values.get("battery_capacity_wh"),
+            discovery.source_ids("battery"),
+        ),
+        battery_capacity_ah=_positive_measurement(
+            values.get("battery_capacity_ah"),
+            discovery.source_ids("battery"),
+        ),
+        battery_voltage_v=_positive_measurement(
+            values.get("battery_voltage_v"),
+            discovery.source_ids("battery"),
+        ),
     )
 
 
@@ -49,6 +61,25 @@ def _semantic_battery_power(measurement: MeasuredValue) -> MeasuredValue:
         confidence=measurement.confidence,
         source_ids=measurement.source_ids,
         reason_code=measurement.reason_code,
+    )
+
+
+def _positive_measurement(
+    entry: Mapping[str, object] | None,
+    source_ids: tuple[str, ...],
+) -> MeasuredValue:
+    """Reject non-positive battery metadata at the semantic gateway boundary."""
+    measurement = _measurement(entry, source_ids)
+    if measurement.value is None or measurement.value > 0.0:
+        return measurement
+    return MeasuredValue(
+        None,
+        0.0,
+        "unavailable",
+        0.0,
+        source_ids,
+        "invalid-non-positive",
+        observed_monotonic=0.0,
     )
 
 

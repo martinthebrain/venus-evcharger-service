@@ -77,15 +77,40 @@ class TestAutoInputSupervisorProcessContracts(unittest.TestCase):
                 manager.spawn_helper(123.0)
 
             command = popen.call_args.args[0]
-            self.assertEqual(command[2:5], ["/helper.py", "/config.ini", str(snapshot_path)])
-            self.assertEqual(command[6], "1")
-            self.assertEqual(command[7], service._auto_input_runtime_instance_id)
+            self.assertEqual(command[:3], ["/helper.py", "/config.ini", str(snapshot_path)])
+            self.assertEqual(command[4], "1")
+            self.assertEqual(command[5], service._auto_input_runtime_instance_id)
             self.assertFalse(snapshot_path.exists())
             self.assertIs(service._auto_input_helper_process, process)
             self.assertEqual(service._auto_input_helper_last_start_at, 123.0)
             self.assertEqual(service._auto_input_helper_generation, 1)
             self.assertIsNone(service._auto_input_snapshot_last_seen)
             self.assertFalse(service._auto_input_snapshot_seen_for_current_helper)
+
+    def test_helper_command_executes_native_binary_directly(self) -> None:
+        service = AutoInputSupervisorServiceFake(
+            auto_input_snapshot_path="/run/auto.json",
+            _auto_input_runtime_instance_id="runtime-id",
+        )
+        manager = AutoInputProcessLifecycle(
+            service,
+            SnapshotRefreshFake(),
+            config_path="/config.ini",
+            helper_path="/repo/deploy/venus/bin/venus-evcharger-auto-input-helper",
+        )
+
+        with patch("venus_evcharger.inputs.supervisor_process.os.getpid", return_value=4321):
+            self.assertEqual(
+                manager._helper_command(8),
+                [
+                    "/repo/deploy/venus/bin/venus-evcharger-auto-input-helper",
+                    "/config.ini",
+                    "/run/auto.json",
+                    "4321",
+                    "8",
+                    "runtime-id",
+                ],
+            )
 
     def test_spawn_preserves_nonvolatile_snapshot_and_handles_unlink_errors(self) -> None:
         process = HelperProcessFake()
@@ -125,6 +150,26 @@ class TestAutoInputSupervisorProcessContracts(unittest.TestCase):
         ):
             lifecycle(service).spawn_helper(3.0)
         kill.assert_called_once_with(9999, 15)
+
+    def test_orphan_matching_recognizes_legacy_python_and_rust_binary(self) -> None:
+        snapshot_path = "/tmp/current.json"
+        command_lines = (
+            b"/usr/bin/python3\x00-u\x00/repo/venus_evcharger_auto_input_helper.py\x00/tmp/current.json\x00",
+            b"/repo/deploy/venus/bin/venus-evcharger-auto-input-helper\x00/config.ini\x00/tmp/current.json\x00",
+        )
+
+        for command_line in command_lines:
+            with self.subTest(command_line=command_line), patch(
+                "builtins.open",
+                mock_open(read_data=command_line),
+            ):
+                self.assertTrue(AutoInputProcessLifecycle._helper_cmdline_matches(123, snapshot_path))
+
+        with patch(
+            "builtins.open",
+            mock_open(read_data=b"/repo/deploy/venus/bin/venus-evcharger-auto-input-helper\x00/other.json\x00"),
+        ):
+            self.assertFalse(AutoInputProcessLifecycle._helper_cmdline_matches(123, snapshot_path))
 
     def test_spawn_tolerates_proc_and_orphan_termination_races(self) -> None:
         service = AutoInputSupervisorServiceFake(auto_input_snapshot_path="/tmp/current.json")

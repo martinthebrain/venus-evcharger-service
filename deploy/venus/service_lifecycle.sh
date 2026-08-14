@@ -69,8 +69,7 @@ venus_managed_service_pids() {
 		command_line=$(tr '\000' ' ' <"$process_dir/cmdline" 2>/dev/null || true)
 		for entrypoint in \
 			"$REPO_DIR/venus_evcharger_service.py" \
-			"$REPO_DIR/venus_evcharger_dbus_adapter.py" \
-			"$REPO_DIR/venus_evcharger_auto_input_helper.py"; do
+			"$REPO_DIR/venus_evcharger_dbus_adapter.py"; do
 			case "$command_line" in
 			"python3 $entrypoint "* | "/usr/bin/python3 $entrypoint "*)
 				basename "$process_dir"
@@ -78,8 +77,16 @@ venus_managed_service_pids() {
 				;;
 			esac
 		done
+		# Reconcile a legacy helper left running by a pre-Rust installation.
+		case "$command_line" in
+		"python3 $REPO_DIR/venus_evcharger_auto_input_helper.py "* | \
+			"/usr/bin/python3 $REPO_DIR/venus_evcharger_auto_input_helper.py "*)
+			basename "$process_dir"
+			;;
+		esac
 		case "$command_line" in
 		"$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer "* | \
+			"$REPO_DIR/deploy/venus/bin/venus-evcharger-auto-input-helper "* | \
 			"python3 $REPO_DIR/venus_evcharger_observer.py "* | \
 			"/usr/bin/python3 $REPO_DIR/venus_evcharger_observer.py "*)
 			basename "$process_dir"

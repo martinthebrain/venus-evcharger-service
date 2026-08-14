@@ -30,6 +30,7 @@ from venus_evcharger.inputs.helper.external_contracts import (
     ExternalEnergyCycle,
     ExternalPollingPolicy,
     ExternalSourcePoll,
+    GatewayBatteryMeasurements,
     PvProjectionPolicy,
 )
 from venus_evcharger.inputs.helper.external_scheduler import ExternalSourceScheduler
@@ -38,7 +39,7 @@ from venus_evcharger.inputs.helper.external_soc import (
     _selected_soc_observed_monotonic,
     _with_gateway_source,
 )
-from venus_evcharger.ipc.energy import MeasuredValue
+from venus_evcharger.inputs.helper.gateway_battery import gateway_battery_source
 
 
 class _ObservedPollPort(Protocol):
@@ -101,19 +102,19 @@ class ConfiguredEnergySources:
 
     @property
     def enabled(self) -> bool:
-        return bool(self.definitions)
+        return bool(self.definitions) or self.gateway_definition is not None
 
     def collect_cycle(
         self,
-        gateway_battery: MeasuredValue | None,
+        gateway_measurements: GatewayBatteryMeasurements,
         now: float,
     ) -> ExternalEnergyCycle:
         """Poll once and reuse the same result for every semantic projection."""
         polls = self._scheduler.poll(now)
         contributing = _contributing_snapshots(polls)
         newly_observed = _newly_observed_snapshots(polls)
-        gateway_source = _gateway_battery_source(
-            gateway_battery,
+        gateway_source = gateway_battery_source(
+            gateway_measurements,
             self.gateway_source_id,
             self.gateway_definition,
         )
@@ -141,7 +142,7 @@ class ConfiguredEnergySources:
             cluster,
             polls,
             gateway_source,
-            gateway_battery,
+            gateway_measurements.soc,
             self.use_combined_soc,
         )
         battery = _battery_payload(
@@ -153,7 +154,11 @@ class ConfiguredEnergySources:
             _source_payloads(
                 polls,
                 gateway_source,
-                None if gateway_battery is None else gateway_battery.observed_monotonic,
+                (
+                    None
+                    if gateway_measurements.primary is None
+                    else gateway_measurements.primary.observed_monotonic
+                ),
                 discharge_balance,
                 discharge_control,
             ),
@@ -184,55 +189,6 @@ def _newly_observed(poll: _ObservedPollPort) -> bool:
     return poll.contributing and poll.poll_status == "success"
 
 
-def _gateway_battery_source(
-    measurement: MeasuredValue | None,
-    fallback_source_id: str,
-    definition: EnergySourceDefinition | None,
-) -> EnergySourceSnapshot | None:
-    if measurement is None or measurement.value is None:
-        return None
-    source_id, configured_service, usable_capacity_wh, battery_chemistry = (
-        _gateway_source_configuration(fallback_source_id, definition)
-    )
-    return EnergySourceSnapshot(
-        source_id=source_id,
-        role="battery",
-        service_name=_gateway_service_name(measurement.source_ids, configured_service),
-        physical_id="" if definition is None else definition.physical_id,
-        physical_priority=0 if definition is None else definition.physical_priority,
-        soc=measurement.value,
-        usable_capacity_wh=usable_capacity_wh,
-        battery_chemistry=battery_chemistry,
-        online=True,
-        confidence=measurement.confidence,
-        captured_at=measurement.observed_at,
-    )
-
-
-def _gateway_source_configuration(
-    fallback_source_id: str,
-    definition: EnergySourceDefinition | None,
-) -> tuple[str, str, float | None, str]:
-    if definition is None:
-        return fallback_source_id, "", None, ""
-    return (
-        definition.source_id,
-        definition.service_name,
-        definition.usable_capacity_wh,
-        definition.battery_chemistry,
-    )
-
-
-def _gateway_service_name(
-    measurement_source_ids: tuple[str, ...],
-    configured_service: str,
-) -> str:
-    measured_service = ",".join(measurement_source_ids)
-    if measured_service:
-        return measured_service
-    if configured_service:
-        return configured_service
-    return "semantic-gateway"
 
 
 def _forecast_cluster_payload(cluster: EnergyClusterSnapshot) -> dict[str, object]:

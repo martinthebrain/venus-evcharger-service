@@ -153,12 +153,21 @@ def configured_device_instance(defaults: configparser.SectionProxy) -> int:
 
 def configured_read_specs(defaults: configparser.SectionProxy) -> ReadSpecs:
     battery_service = _battery_service(defaults)
-    return {
+    specs: ReadSpecs = {
         "grid_power_w": _grid_read_spec(defaults),
         "pv_power_w": _pv_read_spec(defaults),
         "battery_soc": _battery_read_spec(defaults, battery_service),
         "battery_net_power_w": _battery_power_read_spec(defaults),
     }
+    for key, option, fallback in (
+        ("battery_capacity_wh", "AutoBatteryCapacityWhPath", ""),
+        ("battery_capacity_ah", "AutoBatteryCapacityAhPath", "/InstalledCapacity"),
+        ("battery_voltage_v", "AutoBatteryVoltagePath", "/Dc/0/Voltage"),
+    ):
+        path = str(defaults.get(option, fallback)).strip()
+        if path:
+            specs[key] = _battery_metadata_read_spec(defaults, battery_service, path)
+    return specs
 
 
 def rate_settings(defaults: configparser.SectionProxy) -> GatewayRateSettings:
@@ -333,6 +342,25 @@ def _battery_power_read_spec(defaults: configparser.SectionProxy) -> ReadSpec:
         "service": str(defaults.get("AutoBatteryPowerService", "com.victronenergy.system")).strip(),
         "path": str(defaults.get("AutoBatteryPowerPath", "/Dc/Battery/Power")).strip(),
         "interval": 2.0,
+        "priority": "read",
+    }
+
+
+def _battery_metadata_read_spec(
+    defaults: configparser.SectionProxy,
+    battery_service: str,
+    path: str,
+) -> ReadSpec:
+    """Read optional battery metadata from the gateway-selected battery service."""
+    return {
+        "service": battery_service,
+        "prefix": str(defaults.get("AutoBatteryServicePrefix", "com.victronenergy.battery")).strip(),
+        "path": path,
+        "aggregate": "first-service" if not battery_service else "",
+        "interval": max(
+            5.0,
+            config_get_float(defaults, "AutoBatteryScanIntervalSeconds", 300.0),
+        ),
         "priority": "read",
     }
 

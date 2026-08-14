@@ -42,7 +42,11 @@ class TestShellyWallboxMainModule(unittest.TestCase):
         owner_service, functions = owner_factory.call_args.args
         self.assertIs(owner_service, service)
         self.assertEqual(functions.config_path, "/config.ini")
-        self.assertTrue(functions.auto_input_helper_path.endswith("venus_evcharger_auto_input_helper.py"))
+        self.assertTrue(
+            functions.auto_input_helper_path.endswith(
+                "deploy/venus/bin/venus-evcharger-auto-input-helper",
+            )
+        )
         runtime_factory.assert_called_once_with(owner)
         state_factory.assert_called_once_with(owner, runtime)
         update_factory.assert_called_once_with(owner)

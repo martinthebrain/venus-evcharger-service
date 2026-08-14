@@ -21,6 +21,7 @@ from venus_evcharger.inputs.helper.external_contracts import (
     ExternalEnergyCycle,
     ExternalPollingPolicy,
     ExternalSourcePoll,
+    GatewayBatteryMeasurements,
     ProjectedEnergyValue,
     PvProjectionPolicy,
     projection_measurement_status,
@@ -59,8 +60,10 @@ from venus_evcharger.inputs.helper.external_soc import (
 )
 from venus_evcharger.inputs.helper.external_sources import (
     ConfiguredEnergySources,
-    _gateway_battery_source,
     _nested_mappings,
+)
+from venus_evcharger.inputs.helper.gateway_battery import (
+    gateway_battery_source as _gateway_battery_source,
 )
 from venus_evcharger.inputs.helper.sources import AutoInputSources
 from venus_evcharger.ipc.energy import MeasuredValue
@@ -663,6 +666,9 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
             "grid": MeasuredValue(-100.0, 98.0, "fresh", 0.8, ("grid",), observed_monotonic=98.0),
             "battery": MeasuredValue(50.0, 97.0, "fresh", 0.9, ("battery",), observed_monotonic=97.0),
             "battery_power": None,
+            "battery_capacity_wh": None,
+            "battery_capacity_ah": None,
+            "battery_voltage": None,
         }
         sources = AutoInputSources(helper_settings(), gateway)
         external = MagicMock()
@@ -732,7 +738,10 @@ class AutoInputSourcesMutationContracts(unittest.TestCase):
         ):
             sources.prepare_cycle()
 
-        external.collect_cycle.assert_called_once_with(gateway.measurements["battery"], 100.0)
+        external.collect_cycle.assert_called_once_with(
+            GatewayBatteryMeasurements(soc=gateway.measurements["battery"]),
+            100.0,
+        )
         self.assertIs(sources._external_cycle, cycle)
         self.assertEqual(sources._battery_observed_at, 96.0)
         self.assertEqual(sources._battery_observed_monotonic, 96.0)
@@ -1032,9 +1041,9 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
                 monotonic=clock,
             )
 
-        sources.collect_cycle(None, 10.0)
+        sources.collect_cycle(GatewayBatteryMeasurements(), 10.0)
         clock.current = 1.0
-        sources.collect_cycle(None, 11.0)
+        sources.collect_cycle(GatewayBatteryMeasurements(), 11.0)
         sources.close()
         sources.close()
 
@@ -1079,7 +1088,16 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         )
 
         cycle = sources.collect_cycle(
-            MeasuredValue(60.0, 99.0, "fresh", 1.0, ("battery",), observed_monotonic=99.0),
+            GatewayBatteryMeasurements(
+                soc=MeasuredValue(
+                    60.0,
+                    99.0,
+                    "fresh",
+                    1.0,
+                    ("battery",),
+                    observed_monotonic=99.0,
+                )
+            ),
             100.0,
         )
 
@@ -1112,7 +1130,7 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
             definition=definition,
         )
 
-        cycle = sources.collect_cycle(None, 10.0)
+        cycle = sources.collect_cycle(GatewayBatteryMeasurements(), 10.0)
 
         payload = _source_payload(cycle, 0)
         self.assertEqual(payload["source_id"], definition.source_id)
@@ -1132,11 +1150,11 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         with patch("venus_evcharger.inputs.helper.external_scheduler.logging.warning") as warning, patch(
             "venus_evcharger.inputs.helper.external_scheduler.logging.info"
         ) as info:
-            first = sources.collect_cycle(None, 10.0)
+            first = sources.collect_cycle(GatewayBatteryMeasurements(), 10.0)
             clock.current = 1.0
-            second = sources.collect_cycle(None, 11.0)
+            second = sources.collect_cycle(GatewayBatteryMeasurements(), 11.0)
             clock.current = 3.0
-            recovered = sources.collect_cycle(None, 13.0)
+            recovered = sources.collect_cycle(GatewayBatteryMeasurements(), 13.0)
 
         self.assertIsNone(first.battery["battery_soc"])
         self.assertIsNone(second.battery["battery_soc"])
@@ -1154,7 +1172,10 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         gateway = MeasuredValue(61.0, 20.0, "fresh", 0.8, observed_monotonic=20.0)
 
         with patch("venus_evcharger.inputs.helper.external_scheduler.logging.warning"):
-            cycle = sources.collect_cycle(gateway, 20.0)
+            cycle = sources.collect_cycle(
+                GatewayBatteryMeasurements(soc=gateway),
+                20.0,
+            )
 
         self.assertEqual(cycle.battery["battery_soc"], 61.0)
         self.assertEqual(cycle.battery_observed_at, 20.0)
@@ -1173,12 +1194,12 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
         clock = _Clock()
         sources = _sources(reader, clock, use_combined_soc=True, stale_age=5.0)
 
-        fresh = sources.collect_cycle(None, 10.0)
+        fresh = sources.collect_cycle(GatewayBatteryMeasurements(), 10.0)
         with patch("venus_evcharger.inputs.helper.external_scheduler.logging.warning"):
             clock.current = 1.0
-            stale = sources.collect_cycle(None, 11.0)
+            stale = sources.collect_cycle(GatewayBatteryMeasurements(), 11.0)
             clock.current = 6.1
-            expired = sources.collect_cycle(None, 16.1)
+            expired = sources.collect_cycle(GatewayBatteryMeasurements(), 16.1)
 
         self.assertEqual(fresh.battery_observed_at, 10.0)
         self.assertEqual(stale.battery["battery_soc"], 44.0)
@@ -1499,19 +1520,32 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
             physical_priority=12,
             soc=57.0,
             usable_capacity_wh=1234.0,
+            usable_capacity_source="configured",
             battery_chemistry="nmc",
             online=True,
             confidence=0.4,
             captured_at=12.0,
         )
 
-        self.assertEqual(_gateway_battery_source(measured, "fallback", definition), expected)
+        measurements = GatewayBatteryMeasurements(soc=measured)
+        self.assertEqual(
+            _gateway_battery_source(measurements, "fallback", definition),
+            expected,
+        )
         configured_service = replace(measured, source_ids=())
         self.assertEqual(
-            _gateway_battery_source(configured_service, "fallback", definition),
+            _gateway_battery_source(
+                GatewayBatteryMeasurements(soc=configured_service),
+                "fallback",
+                definition,
+            ),
             replace(expected, service_name="configured-service"),
         )
-        unconfigured = _gateway_battery_source(configured_service, "fallback", None)
+        unconfigured = _gateway_battery_source(
+            GatewayBatteryMeasurements(soc=configured_service),
+            "fallback",
+            None,
+        )
         self.assertEqual(
             unconfigured,
             replace(
@@ -1519,15 +1553,119 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
                 source_id="fallback",
                 service_name="semantic-gateway",
                 usable_capacity_wh=None,
+                usable_capacity_source="",
                 battery_chemistry="",
                 physical_id="",
                 physical_priority=0,
             ),
         )
-        self.assertIsNone(_gateway_battery_source(None, "fallback", definition))
         self.assertIsNone(
             _gateway_battery_source(
-                MeasuredValue(None, 0.0, "unknown", 0.0, observed_monotonic=0.0),
+                GatewayBatteryMeasurements(),
+                "fallback",
+                definition,
+            )
+        )
+
+    def test_gateway_capacity_priority_and_validated_lfp_inference(self) -> None:
+        def measured(value: float, name: str) -> MeasuredValue:
+            return MeasuredValue(
+                value,
+                100.0,
+                "fresh",
+                1.0,
+                (name,),
+                observed_monotonic=100.0,
+            )
+
+        measurements = GatewayBatteryMeasurements(
+            soc=measured(98.0, "soc"),
+            capacity_wh=measured(6_000.0, "capacity-wh"),
+            capacity_ah=measured(100.0, "capacity-ah"),
+            voltage_v=measured(52.8, "voltage"),
+        )
+        definition = EnergySourceDefinition(
+            source_id="primary_battery",
+            profile_name="semantic-gateway-battery",
+            usable_capacity_wh=5_000.0,
+            estimated_capacity_wh=4_800.0,
+            estimated_capacity_ah=90.0,
+            estimated_capacity_nominal_voltage_v=48.0,
+            estimated_capacity_cell_count=15,
+        )
+
+        live = _gateway_battery_source(measurements, "fallback", definition)
+        assert live is not None
+        self.assertEqual(
+            (live.usable_capacity_wh, live.usable_capacity_source),
+            (6_000.0, "gateway_capacity_wh"),
+        )
+
+        without_live_wh = replace(measurements, capacity_wh=None)
+        configured = _gateway_battery_source(
+            without_live_wh,
+            "fallback",
+            definition,
+        )
+        assert configured is not None
+        self.assertEqual(
+            (configured.usable_capacity_wh, configured.usable_capacity_source),
+            (5_000.0, "configured"),
+        )
+
+        persisted_definition = replace(definition, usable_capacity_wh=None)
+        persisted = _gateway_battery_source(
+            without_live_wh,
+            "fallback",
+            persisted_definition,
+        )
+        assert persisted is not None
+        self.assertEqual(
+            (persisted.usable_capacity_wh, persisted.usable_capacity_source),
+            (4_800.0, "config_estimated"),
+        )
+
+        inferred_definition = replace(
+            persisted_definition,
+            estimated_capacity_wh=None,
+        )
+        inferred = _gateway_battery_source(
+            without_live_wh,
+            "fallback",
+            inferred_definition,
+        )
+        assert inferred is not None
+        self.assertEqual(
+            (
+                inferred.usable_capacity_wh,
+                inferred.usable_capacity_source,
+                inferred.installed_capacity_ah,
+                inferred.capacity_voltage_v,
+                inferred.capacity_nominal_voltage_v,
+                inferred.capacity_cell_count,
+            ),
+            (5_120.0, "gateway_lfp_inferred", 100.0, 52.8, 51.2, 16),
+        )
+
+        below_threshold = _gateway_battery_source(
+            replace(without_live_wh, soc=measured(94.9, "soc")),
+            "fallback",
+            inferred_definition,
+        )
+        assert below_threshold is not None
+        self.assertIsNone(below_threshold.usable_capacity_wh)
+        self.assertEqual(below_threshold.usable_capacity_source, "")
+        self.assertIsNone(
+            _gateway_battery_source(
+                GatewayBatteryMeasurements(
+                    soc=MeasuredValue(
+                        None,
+                        0.0,
+                        "unknown",
+                        0.0,
+                        observed_monotonic=0.0,
+                    )
+                ),
                 "fallback",
                 definition,
             )
