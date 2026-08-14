@@ -333,17 +333,28 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/boot_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/restart_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
             (source_dir / "deploy/venus/uninstall_venus_evcharger_service.sh").write_text("#!/bin/bash\n", encoding="utf-8")
-            (source_dir / "deploy/venus/service_venus_evcharger/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            service_run_contents = {
+                "service_venus_evcharger": "#!/bin/sh\n# core service\n",
+                "service_venus_evcharger_dbus_adapter": "#!/bin/sh\n# adapter service\n",
+                "service_venus_evcharger_observer": "#!/bin/sh\n# observer service\n",
+            }
+            (source_dir / "deploy/venus/service_venus_evcharger/run").write_text(
+                service_run_contents["service_venus_evcharger"], encoding="utf-8"
+            )
             (source_dir / "deploy/venus/service_venus_evcharger/log/run").write_text("#!/bin/sh\n", encoding="utf-8")
             (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter").mkdir(parents=True)
-            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_dbus_adapter/run").write_text(
+                service_run_contents["service_venus_evcharger_dbus_adapter"], encoding="utf-8"
+            )
             (source_dir / "deploy/venus/bin").mkdir(parents=True)
             (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
                 "observer-binary\n",
                 encoding="utf-8",
             )
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log").mkdir(parents=True)
-            (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text("#!/bin/sh\n", encoding="utf-8")
+            (source_dir / "deploy/venus/service_venus_evcharger_observer/run").write_text(
+                service_run_contents["service_venus_evcharger_observer"], encoding="utf-8"
+            )
             (source_dir / "deploy/venus/service_venus_evcharger_observer/log/run").write_text(
                 "#!/bin/sh\n",
                 encoding="utf-8",
@@ -366,11 +377,15 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "docs/should_not_ship.txt").write_text("omit\n", encoding="utf-8")
 
             (target_dir / "deploy/venus").mkdir(parents=True, exist_ok=True)
-            live_service_dir = target_dir / "deploy/venus/service_venus_evcharger"
-            (live_service_dir / "log").mkdir(parents=True)
-            (live_service_dir / "run").write_text("stale run\n", encoding="utf-8")
-            (live_service_dir / "stale.txt").write_text("remove\n", encoding="utf-8")
-            service_inode = live_service_dir.stat().st_ino
+            live_service_dirs: dict[str, Path] = {}
+            service_inodes: dict[str, int] = {}
+            for service_name in service_run_contents:
+                live_service_dir = target_dir / "deploy/venus" / service_name
+                (live_service_dir / "log").mkdir(parents=True)
+                (live_service_dir / "run").write_text("stale run\n", encoding="utf-8")
+                (live_service_dir / "stale.txt").write_text("remove\n", encoding="utf-8")
+                live_service_dirs[service_name] = live_service_dir
+                service_inodes[service_name] = live_service_dir.stat().st_ino
             original_config = (
                 "[DEFAULT]\n"
                 "# keep this local host comment\n"
@@ -429,9 +444,11 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             self.assertEqual(outer_bootstrap.read_text(encoding="utf-8"), "#!/bin/bash\n")
             self.assertEqual(nice_log.read_text(encoding="utf-8").splitlines(), ["-n 15 " + str(UPDATER_SCRIPT) + " " + str(target_dir)])
             self.assertTrue((target_dir / "deploy/venus/install_venus_evcharger_service.sh").is_file())
-            self.assertEqual(live_service_dir.stat().st_ino, service_inode)
-            self.assertEqual((live_service_dir / "run").read_text(encoding="utf-8"), "#!/bin/sh\n")
-            self.assertFalse((live_service_dir / "stale.txt").exists())
+            for service_name, expected_run in service_run_contents.items():
+                live_service_dir = live_service_dirs[service_name]
+                self.assertEqual(live_service_dir.stat().st_ino, service_inodes[service_name])
+                self.assertEqual((live_service_dir / "run").read_text(encoding="utf-8"), expected_run)
+                self.assertFalse((live_service_dir / "stale.txt").exists())
             self.assertTrue((target_dir / "venus_evcharger/__init__.py").is_file())
             merged_config = (target_dir / "deploy/venus/config.venus_evcharger.ini").read_text(encoding="utf-8")
             self.assertIn("# keep this local host comment\n", merged_config)
@@ -493,6 +510,12 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                 receipt["critical_files"]["deploy/venus/bin/venus-evcharger-forensic-observer"],
                 hashlib.sha256(b"observer-binary\n").hexdigest(),
             )
+            for service_name, expected_run in service_run_contents.items():
+                relative_run = f"deploy/venus/{service_name}/run"
+                self.assertEqual(
+                    receipt["critical_files"][relative_run],
+                    hashlib.sha256(expected_run.encode()).hexdigest(),
+                )
             self.assertIn("venus_evcharger_dbus_adapter.py", receipt["missing_critical_files"])
 
     def test_bootstrap_updater_rejects_invalid_preserved_config_when_validation_fails(self) -> None:

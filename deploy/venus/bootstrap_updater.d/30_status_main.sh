@@ -393,6 +393,7 @@ main() {
 		fi
 	fi
 
+	verify_deployment_sentinels "$SOURCE_DIR" || exit 1
 	record_install_state
 	wait_for_update_resources "deployment-receipt" || exit $?
 	write_deployment_receipt
