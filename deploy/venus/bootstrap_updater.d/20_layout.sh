@@ -19,11 +19,11 @@ cleanup_unwanted_paths() {
 }
 
 copy_item() {
-	src_root="$1"
-	dst_root="$2"
-	rel_path="$3"
-	src_path="${src_root}/${rel_path}"
-	dst_path="${dst_root}/${rel_path}"
+	local src_root="$1"
+	local dst_root="$2"
+	local rel_path="$3"
+	local src_path="${src_root}/${rel_path}"
+	local dst_path="${dst_root}/${rel_path}"
 
 	if [ ! -e "$src_path" ]; then
 		return 0
@@ -47,8 +47,8 @@ copy_item() {
 }
 
 copy_service_layout_in_place() {
-	src_path="$1"
-	dst_path="$2"
+	local src_path="$1"
+	local dst_path="$2"
 	mkdir -p "$dst_path" "$dst_path/log"
 	find "$dst_path" -mindepth 1 -maxdepth 1 ! -name log -exec rm -rf {} \;
 	find "$dst_path/log" -mindepth 1 -maxdepth 1 -exec rm -rf {} \;
@@ -59,9 +59,10 @@ copy_service_layout_in_place() {
 }
 
 copy_venus_layout_in_place() {
-	src_path="$1"
-	dst_path="$2"
-	service_dirs="service_venus_evcharger service_venus_evcharger_dbus_adapter service_venus_evcharger_observer"
+	local src_path="$1"
+	local dst_path="$2"
+	local service_dirs="service_venus_evcharger service_venus_evcharger_dbus_adapter service_venus_evcharger_observer"
+	local service_dir
 
 	find "$dst_path" -mindepth 1 -maxdepth 1 \
 		! -name service_venus_evcharger \
@@ -259,9 +260,39 @@ deployment_sentinel_paths() {
 		venus_evcharger/dbus_adapter/process/adapter.py \
 		venus_evcharger/core/contracts_bootstrap.py \
 		deploy/venus/bin/venus-evcharger-forensic-observer \
+		deploy/venus/service_venus_evcharger/run \
+		deploy/venus/service_venus_evcharger/log/run \
+		deploy/venus/service_venus_evcharger_dbus_adapter/run \
+		deploy/venus/service_venus_evcharger_dbus_adapter/log/run \
+		deploy/venus/service_venus_evcharger_observer/run \
+		deploy/venus/service_venus_evcharger_observer/log/run \
 		deploy/venus/bootstrap_updater.sh \
 		deploy/venus/service_lifecycle.sh \
 		deploy/venus/install_venus_evcharger_service.sh
+}
+
+verify_deployment_sentinels() {
+	local expected_root="$1"
+	local active_root
+	local relative_path
+	local expected_path
+	local active_path
+	active_root=$(current_codebase_dir)
+
+	while IFS= read -r relative_path; do
+		expected_path="${expected_root}/${relative_path}"
+		active_path="${active_root}/${relative_path}"
+		if [ ! -f "$expected_path" ]; then
+			continue
+		fi
+		if [ ! -f "$active_path" ] || ! cmp -s "$expected_path" "$active_path"; then
+			log "Deployment verification failed for $relative_path"
+			set_failure_reason_once "deployment-verification-failed"
+			return 1
+		fi
+	done <<EOF
+$(deployment_sentinel_paths)
+EOF
 }
 
 write_deployment_receipt() {
