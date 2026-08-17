@@ -18,13 +18,12 @@ use crate::probe::{BackendProbe, BackendProbeResult};
 const RUNTIME_LOG_DIR: &str = "/var/volatile/log/dbus-venus-evcharger";
 const LOG_TAIL_BYTES: usize = 20_000;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(3);
-const TRACE_MARKERS: [&str; 6] = [
+const TRACE_MARKERS: [&str; 5] = [
     "Traceback",
     "malloc()",
     "NoReply",
     "dbus down",
-    "Watchdog recovery",
-    "stale",
+    "Watchdog recovery",    
 ];
 
 /// Stable gateway-diagnostics envelope in one forensic artifact.
@@ -102,7 +101,7 @@ impl ForensicSnapshot {
         let runtime_logs = tail_log_dir(Path::new(RUNTIME_LOG_DIR), LOG_TAIL_BYTES);
         let ps = command_output(&["ps", "w"], COMMAND_TIMEOUT);
         let helper_processes =
-            matching_processes(ps.stdout(), "venus_evcharger_auto_input_helper.py");
+            matching_processes(ps.stdout(), "venus_evcharger_auto_input_helper");
         Self {
             timestamp: epoch_seconds(),
             config_path: config.path.to_string_lossy().into_owned(),
@@ -282,6 +281,17 @@ mod tests {
         assert_eq!(slug_text("NoReply"), "noreply");
         assert_eq!(slug_text("malloc()"), "malloc");
         assert_eq!(slug_text("--"), "event");
+    }
+
+    #[test]
+    fn learning_stale_is_not_an_incident_marker() {
+        let mut logs = BTreeMap::new();
+        logs.insert(
+            "current".to_owned(),
+            "learned_charge_power_reason=learning-stale".to_owned(),
+        );
+
+        assert!(super::runtime_markers(&logs).is_empty());
     }
 
     #[test]
