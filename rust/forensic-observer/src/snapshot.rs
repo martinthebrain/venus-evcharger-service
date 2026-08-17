@@ -23,7 +23,7 @@ const TRACE_MARKERS: [&str; 5] = [
     "malloc()",
     "NoReply",
     "dbus down",
-    "Watchdog recovery",    
+    "Watchdog recovery",
 ];
 
 /// Stable gateway-diagnostics envelope in one forensic artifact.
@@ -100,8 +100,7 @@ impl ForensicSnapshot {
         let gateway_diagnostics = read_gateway(&config.gateway_diagnostics_path());
         let runtime_logs = tail_log_dir(Path::new(RUNTIME_LOG_DIR), LOG_TAIL_BYTES);
         let ps = command_output(&["ps", "w"], COMMAND_TIMEOUT);
-        let helper_processes =
-            matching_processes(ps.stdout(), "venus_evcharger_auto_input_helper");
+        let helper_processes = matching_processes(ps.stdout(), "venus-evcharger-auto-input-helper");
         Self {
             timestamp: epoch_seconds(),
             config_path: config.path.to_string_lossy().into_owned(),
