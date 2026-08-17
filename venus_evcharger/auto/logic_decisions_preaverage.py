@@ -32,6 +32,13 @@ class AutoWorkflowMetrics(Protocol):
         relay_on: bool,
     ) -> tuple[float | None, float | None]: ...
 
+    def set_scheduled_night_metrics(
+        self,
+        *,
+        grid_power: float | None,
+        battery_soc: float | None,
+    ) -> None: ...
+
 
 class AutoWorkflowGates(Protocol):
     def handle_non_auto_mode(self, relay_on: bool) -> bool: ...
@@ -128,7 +135,10 @@ class AutoDecisionWorkflow:
         if early_decision is not None:
             return early_decision
         if self.samples.scheduled_night_charge_active(now):
-            return NO_RELAY_DECISION, None
+            return (
+                NO_RELAY_DECISION,
+                None if battery_soc is None else float(battery_soc),
+            )
         battery_soc, early_decision = self._pre_average_battery_soc_result(
             battery_soc,
             relay_on,
@@ -364,7 +374,13 @@ class AutoDecisionWorkflow:
         if resolved is not None:
             return resolved
         if self.samples.scheduled_night_charge_active(now):
-            return self.relay.scheduled_night_decision(relay_on, now, cached_inputs)
+            self.metrics.set_scheduled_night_metrics(
+                grid_power=grid_power,
+                battery_soc=battery_soc,
+            )
+            return self.relay.scheduled_night_decision(
+                relay_on, now, cached_inputs
+            )
         pv_power, battery_soc, grid_power = self._required_average_inputs(pv_power, battery_soc, grid_power)
         averages = self._averaged_auto_metrics(
             now,

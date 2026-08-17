@@ -232,6 +232,48 @@ class TestAutoLogicGatesMetrics(unittest.TestCase):
         self.assertIn(("battery_activity",), harness.calls)
         self.assertIn(("active_learned_power", 20.0), harness.calls)
 
+    def test_scheduled_night_metrics_replace_stale_auto_metrics(self) -> None:
+        harness = MetricsHarness()
+
+        # Simulate metrics left over from a previous normal auto decision.
+        harness.service._last_auto_metrics = {
+            "soc": 94.0,
+            "grid": -10.0,
+            "surplus": 0.0,
+            "profile": "high-soc",
+            "start_threshold": 1742.0,
+            "stop_threshold": 845.0,
+            "learned_charge_power": 2006.0,
+            "learned_charge_power_state": "stable",
+            "threshold_scale": 1.056,
+            "threshold_mode": "adaptive",
+            "stop_alpha": 0.55,
+            "stop_alpha_stage": "stable",
+            "surplus_volatility": 0.0,
+        }
+
+        harness.metrics.set_scheduled_night_metrics(
+            grid_power=212.875,
+            battery_soc=11.0,
+        )
+
+        metrics = harness.service._last_auto_metrics
+
+        self.assertEqual(metrics["soc"], 11.0)
+        self.assertEqual(metrics["grid"], 212.875)
+
+        self.assertIsNone(metrics["surplus"])
+        self.assertIsNone(metrics["profile"])
+        self.assertIsNone(metrics["start_threshold"])
+        self.assertIsNone(metrics["stop_threshold"])
+        self.assertIsNone(metrics["learned_charge_power"])
+        self.assertIsNone(metrics["learned_charge_power_state"])
+        self.assertIsNone(metrics["threshold_scale"])
+        self.assertIsNone(metrics["threshold_mode"])
+        self.assertIsNone(metrics["stop_alpha"])
+        self.assertIsNone(metrics["stop_alpha_stage"])
+        self.assertIsNone(metrics["surplus_volatility"])
+
     def test_surplus_threshold_smoothing_and_learned_metrics_are_explicit(self) -> None:
         harness = MetricsHarness()
         harness.thresholds = (1600, 800, "high-soc")

@@ -128,6 +128,16 @@ class PreAverageHarness:
         self.calls.append(("averages", now, pv_power, grid_power, battery_soc, relay_on))
         return self.average_result
 
+    def set_scheduled_night_metrics(
+        self,
+        *,
+        grid_power: float | None,
+        battery_soc: float | None,
+    ) -> None:
+        self.calls.append(
+            ("scheduled_night_metrics", grid_power, battery_soc)
+        )
+
     def set_health(self, reason: str, cached: bool = False, relay_intent: bool | None = None) -> None:
         self.health_calls.append((reason, cached, relay_intent))
 
@@ -340,7 +350,7 @@ class TestPreAverageDecisions(unittest.TestCase):
         decision, battery_soc = harness.workflow._pre_average_decision(False, 1000.0, 70.0, -500.0, 41.0, True)
 
         self.assertIs(decision, NO_RELAY_DECISION)
-        self.assertIsNone(battery_soc)
+        self.assertEqual(battery_soc, 70.0)
         self.assertEqual(
             harness.calls,
             [
@@ -566,9 +576,9 @@ class TestPreAverageDecisions(unittest.TestCase):
         self.assertTrue(
             harness.workflow._auto_decision_after_pre_average(
                 relay_on=False,
-                pv_power=None,
-                battery_soc=None,
-                grid_power=None,
+                pv_power=0.0,
+                battery_soc=11.0,
+                grid_power=212.9,
                 now=131.0,
                 cached_inputs=True,
                 pre_average_decision=NO_RELAY_DECISION,
@@ -578,6 +588,7 @@ class TestPreAverageDecisions(unittest.TestCase):
             harness.calls,
             [
                 ("scheduled_night_active", 131.0),
+                ("scheduled_night_metrics", 212.9, 11.0),
                 ("scheduled_night_decision", False, 131.0, True),
             ],
         )

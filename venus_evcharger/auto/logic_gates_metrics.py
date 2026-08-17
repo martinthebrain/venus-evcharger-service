@@ -29,6 +29,29 @@ class AutoDecisionMetrics:
         self.battery_balance = battery_balance
         self._ev_priority_active = False
 
+    def set_scheduled_night_metrics(
+        self,
+        *,
+        grid_power: float | None,
+        battery_soc: float | None,
+    ) -> None:
+        """Publish metrics that are actually applicable to scheduled-night decisions."""
+        self.service._last_auto_metrics = {
+            "surplus": None,
+            "grid": None if grid_power is None else float(grid_power),
+            "soc": None if battery_soc is None else float(battery_soc),
+            "profile": None,
+            "start_threshold": None,
+            "stop_threshold": None,
+            "learned_charge_power": None,
+            "learned_charge_power_state": None,
+            "threshold_scale": None,
+            "threshold_mode": None,
+            "stop_alpha": None,
+            "stop_alpha_stage": None,
+            "surplus_volatility": None,
+        }
+
     def update_average_metrics(
         self,
         now: float,
