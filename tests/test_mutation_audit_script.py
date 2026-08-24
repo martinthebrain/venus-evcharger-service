@@ -267,7 +267,7 @@ class MutationAuditScriptTests(unittest.TestCase):
         self.assertEqual(len(prefixes), len(set(prefixes)))
         self.assertEqual(
             hashlib.sha256(serialized).hexdigest(),
-            "a87bb005ed197ee15720170fe8f5eef9b6c333023e50fdb3813465841d5e7c5f",
+            "e91c77c877cb6b9d376c3116fba702d0c66f6ba1d3afdbd04cad8aef2d851d09",
         )
 
         all_selections = mutation_audit_config.focused_test_selections()
@@ -278,7 +278,7 @@ class MutationAuditScriptTests(unittest.TestCase):
         )
         self.assertEqual(
             hashlib.sha256(json.dumps(all_selections, separators=(",", ":")).encode()).hexdigest(),
-            "07bd0b705735d227bbfa95ef316d4dc09e0f4840b76d3937db2c08aadd0d7d57",
+            "26f09873ed815ee98c430b73ec12aacf8ade7de1f8df3aebe86f85239898616b",
         )
 
     def test_mutation_config_can_target_dev_scripts(self) -> None:
@@ -737,6 +737,7 @@ class MutationAuditScriptTests(unittest.TestCase):
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_cache_publish_interval_contracts",
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_signal_handlers_andlist_services_edges",
                 "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_local_publish_timing_contracts_record_latency_and_errors",
+                "tests/test_dbus_gateway_adapter_scheduler.py::DbusGatewayAdapterSchedulerTests::test_only_relevant_service_topology_changes_request_introspection",
                 "tests/test_dbus_adapter_process_io_async_contracts.py",
             ),
             "venus_evcharger/dbus_adapter/process/runtime.py": (

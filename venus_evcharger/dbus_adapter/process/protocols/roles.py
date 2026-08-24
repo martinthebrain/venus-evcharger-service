@@ -71,6 +71,7 @@ class IoRole(Protocol):  # pragma: no cover
 
 
 class IntrospectionRole(Protocol):  # pragma: no cover
+    def request_background_scan(self) -> None: ...
     def enqueue_background_introspection_if_due(self) -> None: ...
     def schedule_non_write_command(
         self,

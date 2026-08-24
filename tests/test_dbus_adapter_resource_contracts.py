@@ -178,6 +178,7 @@ class TestResourceMonitorContracts(unittest.TestCase):
                 "mem_available_pct": 50.0,
                 "memory_sample_status": "fresh",
                 "memory_sample_age_s": 0.0,
+                "pressure_evidence": None,
                 "process": {
                     "pid": 123,
                     "rss_kb": 10.0,
@@ -238,6 +239,54 @@ class TestResourceMonitorContracts(unittest.TestCase):
 
         self.assertEqual(monitor.snapshot()["state"], "constrained")
         self.assertEqual(monitor.snapshot()["state"], "constrained")
+
+    def test_monitor_retains_exact_constrained_trigger_evidence(self) -> None:
+        reader = _ResourceReader(
+            system_cpu=iter([(100, 50), (200, 100), (300, 150)]),
+            process_cpu=iter([1.0, 2.0, 3.0]),
+            load_average=(6.0, 3.0, 1.0),
+            cpu_count=4,
+        )
+        monitor = ResourceMonitor(
+            pid=123,
+            settings=_settings(recovery_hold_seconds=0.0),
+            reader=reader,
+            monotonic=iter([1.0, 2.0, 3.0]).__next__,
+            wall_clock=iter([100.0, 101.0, 102.0]).__next__,
+        )
+
+        active = monitor.snapshot()
+        evidence = active["pressure_evidence"]
+        self.assertEqual(
+            evidence,
+            {
+                "active": True,
+                "triggered_at": 100.0,
+                "causes": ["load"],
+                "load_per_cpu_1m": 1.5,
+                "system_cpu_pct": 0.0,
+                "mem_available_kb": 100000.0,
+            },
+        )
+        assert isinstance(evidence, dict)
+        causes = evidence["causes"]
+        assert isinstance(causes, list)
+        causes.append("cpu")
+
+        monitor._reader._load_average = (0.0, 0.0, 0.0)
+        recovered = monitor.snapshot()
+        self.assertEqual(recovered["state"], "ok")
+        self.assertEqual(
+            recovered["pressure_evidence"],
+            {
+                "active": False,
+                "triggered_at": 100.0,
+                "causes": ["load"],
+                "load_per_cpu_1m": 1.5,
+                "system_cpu_pct": 0.0,
+                "mem_available_kb": 100000.0,
+            },
+        )
 
     def test_monitor_forwards_load_and_cpu_pressure_dimensions(self) -> None:
         load_monitor = ResourceMonitor(

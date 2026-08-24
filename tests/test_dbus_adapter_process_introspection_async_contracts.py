@@ -320,7 +320,7 @@ class DbusAdapterProcessIntrospectionAsyncContractTests(GatewayAdapterContractCa
                     "battery_voltage_v",
                 )
             )
-            self.assertEqual(adapter._last_introspection_full_scan_at, 0.0)
+            self.assertEqual(adapter._last_introspection_full_scan_at, 77.0)
 
             force_reads.reset_mock()
             force_discovery.reset_mock()
@@ -329,7 +329,7 @@ class DbusAdapterProcessIntrospectionAsyncContractTests(GatewayAdapterContractCa
             self.assertEqual(role.refresh_energy_inputs_command(topology), "applied")
             force_discovery.assert_called_once_with()
             force_reads.assert_called_once_with(())
-            self.assertEqual(adapter._last_introspection_full_scan_at, 0.0)
+            self.assertEqual(adapter._last_introspection_full_scan_at, 88.0)
 
             force_reads.reset_mock()
             force_discovery.reset_mock()

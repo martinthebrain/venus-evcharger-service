@@ -11,6 +11,7 @@ from venus_evcharger.dbus_adapter.async_protocols import DbusConnectionLifecycle
 from venus_evcharger.dbus_adapter.process.protocols.roles import (
     DiagnosticsRole,
     HealthRole,
+    IntrospectionRole,
     IntrospectionSnapshotRole,
 )
 from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusRateLimiter
@@ -56,6 +57,8 @@ class DbusAdapterIoContext(Protocol):  # pragma: no cover
     def health_role(self) -> HealthRole: ...
     @property
     def diagnostics_role(self) -> DiagnosticsRole: ...
+    @property
+    def introspection_role(self) -> IntrospectionRole: ...
     @property
     def introspection_snapshot_role(self) -> IntrospectionSnapshotRole: ...
     @property

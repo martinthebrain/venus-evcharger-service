@@ -20,6 +20,9 @@ from venus_evcharger.ports.gateway_diagnostic_health import (
     GatewayHealthState,
     GatewayHealthSummary,
     GatewayPublicationSummary,
+    GatewayResourceState,
+    ProtectiveTriggerSummary,
+    ResourcePressureSummary,
 )
 from venus_evcharger.ports.gateway_diagnostics_validation import (
     normalized_epoch_timestamp,
@@ -58,7 +61,30 @@ def health_summary(
         maximum_event_loop_gap_ms_60s=_eventloop_lateness(eventloop),
         last_success_at=_non_negative_float(health.get("last_success_at")),
         last_error_code=_last_error_code(health.get("last_error")),
+        active_protective_trigger=_protective_trigger(
+            health.get("active_protective_trigger")
+        ),
+        last_protective_trigger=_protective_trigger(
+            health.get("last_protective_trigger")
+        ),
+        operational_state=_health_state(health.get("operational_state")),
+        performance_state=_health_state(health.get("performance_state")),
+        resource_state=_resource_state(health.get("resource_state")),
+        protective_cause=_text(health.get("protective_cause")),
+        resource_evidence=_resource_evidence(health.get("resource_evidence")),
     )
+
+
+def _protective_trigger(value: object) -> ProtectiveTriggerSummary | None:
+    if value is None:
+        return None
+    return ProtectiveTriggerSummary.from_payload(value)
+
+
+def _resource_evidence(value: object) -> ResourcePressureSummary | None:
+    if value is None:
+        return None
+    return ResourcePressureSummary.from_payload(value)
 
 
 def discovery_summary(
@@ -226,6 +252,17 @@ def _health_state(value: object) -> GatewayHealthState:
         return "degraded"
     if normalized == "protective":
         return "protective"
+    return "unknown"
+
+
+def _resource_state(value: object) -> GatewayResourceState:
+    normalized = _text(value)
+    if normalized == "ok":
+        return "ok"
+    if normalized == "busy":
+        return "busy"
+    if normalized == "constrained":
+        return "constrained"
     return "unknown"
 
 

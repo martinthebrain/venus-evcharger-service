@@ -747,6 +747,7 @@ class GatewayIsolationOperationalToolsTests(unittest.TestCase):
             self.isolation.PROCESS_LOOP: (
                 "from dbus.mainloop.glib import DBusGMainLoop\nDBusGMainLoop(set_as_default=True)\n"
             ),
+            self.isolation.DBUS_ERROR_CLASSIFIER: "import dbus\n",
         }
         for path, source in allowed_sources.items():
             with self.subTest(path=path.name):

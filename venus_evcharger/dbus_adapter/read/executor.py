@@ -7,7 +7,8 @@ import logging
 from collections.abc import Callable
 
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
-from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter.dbus_errors import DBUS_GATEWAY_OPERATION_ERRORS
+from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
 from venus_evcharger.dbus_adapter.read.aggregate import (
     PV_TOTAL_AGGREGATE,
     AggregateState,
@@ -45,9 +46,7 @@ class DbusReadExecutor:
         self._pv_continuity = PvAggregateContinuity(adapter, self._aggregates, monotonic=monotonic)
         self.last_operation_performed = False
 
-    def poll_read_spec(
-        self, key: str, spec: ReadSpec, *, completion: ReadCompletion | None = None
-    ) -> CommandOutcome:
+    def poll_read_spec(self, key: str, spec: ReadSpec, *, completion: ReadCompletion | None = None) -> CommandOutcome:
         self.last_operation_performed = False
         self._stale_after_by_key[key] = read_spec_stale_after_seconds(spec)
         completed: list[CommandOutcome] = []

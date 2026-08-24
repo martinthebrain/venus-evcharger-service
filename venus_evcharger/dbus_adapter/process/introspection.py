@@ -18,8 +18,9 @@ from venus_evcharger.dbus_adapter.contracts import (
     CommandExecution,
     CommandOutcome,
 )
+from venus_evcharger.dbus_adapter.dbus_errors import DBUS_GATEWAY_OPERATION_ERRORS
 from venus_evcharger.dbus_adapter.process.protocols.introspection import DbusAdapterIntrospectionContext
-from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
 from venus_evcharger.dbus_adapter.read.keys import SEMANTIC_ENERGY_READ_KEYS
 from venus_evcharger.dbus_gateway_core import float_or_default, float_or_zero
 from venus_evcharger.ipc.command_types import CommandMapping
@@ -60,6 +61,10 @@ def _introspection_call(
 class DbusAdapterIntrospection:
     def __init__(self, context: DbusAdapterIntrospectionContext) -> None:
         self._context = context
+
+    def request_background_scan(self) -> None:
+        """Make one background scan due after relevant topology changed."""
+        self._context._last_introspection_full_scan_at = 0.0
 
     def enqueue_introspection_command(
         self,
@@ -156,7 +161,6 @@ class DbusAdapterIntrospection:
             return "dropped"
         if request.scope in {"all", "topology"}:
             self._context.discovery.force_due()
-            self._context._last_introspection_full_scan_at = 0.0
         self._context.read_scheduler.force_due(self._stale_refresh_keys(keys, request.max_age_seconds))
         return "applied"
 

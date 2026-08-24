@@ -11,6 +11,7 @@ use crate::artifact::{
 use crate::config::ObserverConfig;
 use crate::error::Result;
 use crate::snapshot::ForensicSnapshot;
+use crate::system_activity::SystemActivitySampler;
 
 /// Runtime options accepted by the observer entrypoint.
 #[derive(Clone, Debug, PartialEq)]
@@ -58,10 +59,11 @@ pub fn validate_config(path: &Path) -> Result<()> {
 ///
 /// Returns an error when a scheduled observation or incident write fails.
 pub fn run(options: &ObserverOptions) -> Result<()> {
+    let mut activity_sampler = SystemActivitySampler::start();
     thread::sleep(seconds_duration(options.start_delay_seconds.max(0.0)));
     let mut last_incident_at = None;
     loop {
-        last_incident_at = observer_iteration(options, last_incident_at)?;
+        last_incident_at = observer_iteration(options, last_incident_at, &mut activity_sampler)?;
         thread::sleep(seconds_duration(options.interval_seconds.max(1.0)));
     }
 }
@@ -75,14 +77,16 @@ pub fn run(options: &ObserverOptions) -> Result<()> {
 pub fn observer_iteration(
     options: &ObserverOptions,
     last_incident_at: Option<Instant>,
+    activity_sampler: &mut SystemActivitySampler,
 ) -> Result<Option<Instant>> {
+    let system_activity = activity_sampler.observe();
     observer_iteration_with(
         options,
         last_incident_at,
         Instant::now(),
         |path| {
             let config = ObserverConfig::load(path)?;
-            let snapshot = ForensicSnapshot::collect(&config);
+            let snapshot = ForensicSnapshot::collect_with_system_activity(&config, system_activity);
             Ok((config, snapshot))
         },
         |config, snapshot, reasons, mounts, lock| {

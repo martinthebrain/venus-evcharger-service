@@ -354,7 +354,72 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
                 "maximum_event_loop_gap_ms_60s": 25.0,
                 "last_success_at": 99.5,
                 "last_error_code": "connection-failed",
+                "active_protective_trigger": None,
+                "last_protective_trigger": None,
+                "operational_state": "unknown",
+                "performance_state": "unknown",
+                "resource_state": "unknown",
+                "protective_cause": "",
+                "resource_evidence": None,
             },
+        )
+
+        trigger = {
+            "triggered_at": 100.0,
+            "protective_until": 280.0,
+            "timeout_count_60s": 6,
+            "operation_kind": "optional_read",
+            "source": "com.example.energy/Ac/Power",
+            "error_code": "timeout",
+            "latency_ms": 750.0,
+        }
+        payload["active_protective_trigger"] = trigger
+        payload["last_protective_trigger"] = trigger
+        protected = diagnostics_summary.health_summary(
+            payload,
+            max_tick_seconds=0.5,
+        )
+        self.assertEqual(
+            protected.active_protective_trigger,
+            protected.last_protective_trigger,
+        )
+        self.assertEqual(
+            protected.active_protective_trigger.source
+            if protected.active_protective_trigger is not None
+            else "",
+            "com.example.energy/Ac/Power",
+        )
+
+        payload.update(
+            {
+                "state": "degraded",
+                "active_protective_trigger": None,
+                "last_protective_trigger": trigger,
+                "operational_state": "ok",
+                "performance_state": "degraded",
+                "resource_state": "constrained",
+                "protective_cause": "",
+                "resource_evidence": {
+                    "active": True,
+                    "triggered_at": 101.0,
+                    "causes": ["load"],
+                    "load_per_cpu_1m": 1.5,
+                    "system_cpu_pct": 72.0,
+                    "mem_available_kb": 110000.0,
+                },
+            }
+        )
+        resource_summary = diagnostics_summary.health_summary(
+            payload,
+            max_tick_seconds=0.5,
+        )
+        self.assertEqual(resource_summary.state, "degraded")
+        self.assertEqual(resource_summary.resource_state, "constrained")
+        self.assertEqual(
+            resource_summary.resource_evidence.causes
+            if resource_summary.resource_evidence is not None
+            else (),
+            ("load",),
         )
 
         payload["mainloop_heartbeat_age_s"] = 1.001

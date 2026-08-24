@@ -228,6 +228,9 @@ class GatewayIntrospectionBackgroundCases(GatewayAdapterContractCase):
             enqueue.reset_mock()
             with patch.object(introspection_module.time, "time", return_value=100.0):
                 adapter.introspection_role.enqueue_background_introspection_if_due()
+            adapter._last_introspection_full_scan_at = 123.0
+            adapter.introspection_role.request_background_scan()
+            self.assertEqual(adapter._last_introspection_full_scan_at, 0.0)
             enqueue.assert_not_called()
 
     def test_introspection_discovery_honors_custom_and_explicit_sources(self) -> None:

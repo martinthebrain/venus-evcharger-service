@@ -8,6 +8,7 @@ import json
 import math
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from tests.gateway_diagnostics_fixtures import diagnostic_samples, gateway_diagnostics_snapshot
@@ -27,6 +28,8 @@ from venus_evcharger.ports.gateway_diagnostic_discovery import (
 from venus_evcharger.ports.gateway_diagnostic_health import (
     GatewayHealthSummary,
     GatewayPublicationSummary,
+    ProtectiveTriggerSummary,
+    ResourcePressureSummary,
 )
 from venus_evcharger.ports.gateway_diagnostic_values import (
     DiagnosticScalar,
@@ -294,6 +297,72 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
             with self.subTest(replacement=replacement), self.assertRaises((TypeError, ValueError)):
                 GatewayHealthSummary.from_payload(base | replacement)
 
+    def test_protective_trigger_summary_roundtrips_and_rejects_bad_evidence(self) -> None:
+        trigger = ProtectiveTriggerSummary(
+            triggered_at=100.0,
+            protective_until=280.0,
+            timeout_count_60s=6,
+            operation_kind="optional_read",
+            source="com.example.energy/Ac/Power",
+            error_code="timeout",
+            latency_ms=750.0,
+        )
+        self.assertEqual(
+            ProtectiveTriggerSummary.from_payload(trigger.to_payload()),
+            trigger,
+        )
+        health = replace(
+            gateway_diagnostics_snapshot().health,
+            state="protective",
+            active_protective_trigger=trigger,
+            last_protective_trigger=trigger,
+        )
+        self.assertEqual(GatewayHealthSummary.from_payload(health.to_payload()), health)
+        for replacement in (
+            {"triggered_at": 0.0},
+            {"protective_until": 99.0},
+            {"timeout_count_60s": 0},
+            {"operation_kind": ""},
+            {"error_code": ""},
+            {"latency_ms": -1.0},
+        ):
+            with self.subTest(replacement=replacement), self.assertRaises(
+                (TypeError, ValueError)
+            ):
+                ProtectiveTriggerSummary.from_payload(trigger.to_payload() | replacement)
+
+    def test_resource_pressure_summary_roundtrips_and_enforces_causal_metrics(self) -> None:
+        evidence = ResourcePressureSummary(
+            active=True,
+            triggered_at=100.0,
+            causes=("load",),
+            load_per_cpu_1m=1.5,
+            system_cpu_pct=72.0,
+            mem_available_kb=110000.0,
+        )
+        self.assertEqual(ResourcePressureSummary.from_payload(evidence.to_payload()), evidence)
+        health = replace(
+            gateway_diagnostics_snapshot().health,
+            state="degraded",
+            operational_state="ok",
+            performance_state="degraded",
+            resource_state="constrained",
+            resource_evidence=evidence,
+        )
+        self.assertEqual(GatewayHealthSummary.from_payload(health.to_payload()), health)
+        for replacement in (
+            {"triggered_at": 0.0},
+            {"causes": []},
+            {"causes": ["load", "load"]},
+            {"causes": ["disk"]},
+            {"load_per_cpu_1m": None},
+            {"active": 1},
+        ):
+            with self.subTest(replacement=replacement), self.assertRaises(
+                (TypeError, ValueError)
+            ):
+                ResourcePressureSummary.from_payload(evidence.to_payload() | replacement)
+
     def test_discovery_summary_enforces_bounded_semantics(self) -> None:
         discovery = gateway_diagnostics_snapshot().discovery
         self.assertEqual(GatewayDiscoverySummary.from_payload(discovery.to_payload()), discovery)
@@ -406,7 +475,7 @@ class GatewayDiagnosticsContractsTests(unittest.TestCase):
                 discovery=snapshot.discovery,
                 publication=snapshot.publication,
                 ev_charger=snapshot.ev_charger,
-                schema_version=4,
+                schema_version=6,
             )
         with self.assertRaisesRegex(TypeError, "invalid sample"):
             diagnostics_contract._sample_tuple([*samples])

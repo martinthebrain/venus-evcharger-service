@@ -98,6 +98,65 @@ fn protective_health_is_preserved_semantically() {
 }
 
 #[test]
+fn schema_four_preserves_protective_trigger_evidence() {
+    let mut protective = document();
+    protective["schema_version"] = json!(4);
+    protective["health"]["state"] = json!("protective");
+    let trigger = json!({
+        "triggered_at": 90.0,
+        "protective_until": 270.0,
+        "timeout_count_60s": 6,
+        "operation_kind": "optional_read",
+        "source": "com.example.energy/Ac/Power",
+        "error_code": "timeout",
+        "latency_ms": 750.0
+    });
+    protective["health"]["active_protective_trigger"] = trigger.clone();
+    protective["health"]["last_protective_trigger"] = trigger.clone();
+
+    let parsed = GatewayDiagnostics::from_value(&protective);
+    assert!(parsed.is_ok());
+    let serialized = serde_json::to_value(parsed.ok()).unwrap_or(Value::Null);
+    assert_eq!(serialized["schema_version"], json!(4));
+    assert_eq!(serialized["health"]["active_protective_trigger"], trigger);
+}
+
+#[test]
+fn schema_five_preserves_resource_cause_without_inventing_circuit_failure() {
+    let mut pressure = document();
+    pressure["schema_version"] = json!(5);
+    pressure["health"]["state"] = json!("degraded");
+    pressure["health"]["active_protective_trigger"] = Value::Null;
+    pressure["health"]["last_protective_trigger"] = Value::Null;
+    pressure["health"]["operational_state"] = json!("ok");
+    pressure["health"]["performance_state"] = json!("degraded");
+    pressure["health"]["resource_state"] = json!("constrained");
+    pressure["health"]["protective_cause"] = json!("");
+    pressure["health"]["resource_evidence"] = json!({
+        "active": true,
+        "triggered_at": 99.0,
+        "causes": ["load"],
+        "load_per_cpu_1m": 1.5,
+        "system_cpu_pct": 72.0,
+        "mem_available_kb": 110_000.0
+    });
+
+    let parsed = GatewayDiagnostics::from_value(&pressure);
+    assert!(parsed.is_ok());
+    let serialized = serde_json::to_value(parsed.ok()).unwrap_or(Value::Null);
+    assert_eq!(serialized["schema_version"], json!(5));
+    assert_eq!(serialized["health"]["state"], json!("degraded"));
+    assert_eq!(
+        serialized["health"]["resource_evidence"]["causes"],
+        json!(["load"])
+    );
+
+    pressure["health"]["resource_evidence"]["causes"] = json!(["memory"]);
+    pressure["health"]["resource_evidence"]["mem_available_kb"] = Value::Null;
+    assert!(GatewayDiagnostics::from_value(&pressure).is_err());
+}
+
+#[test]
 fn diagnostics_file_size_is_bounded_before_json_decoding() {
     let directory = tempdir();
     assert!(directory.is_ok());

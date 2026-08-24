@@ -33,7 +33,7 @@ class GatewayHealthStateContractsTests(unittest.TestCase):
             ("ok", "busy", "ok", "ok"),
             ("ok", "ok", "congested", "degraded"),
             ("ok", "ok", "slow", "degraded"),
-            ("ok", "constrained", "ok", "protective"),
+            ("ok", "constrained", "ok", "degraded"),
             ("ok", "ok", "protective", "protective"),
         )
         for slo, resources, backpressure, expected in cases:
@@ -49,6 +49,18 @@ class GatewayHealthStateContractsTests(unittest.TestCase):
                         backpressure_state=backpressure,
                     ),
                     expected,
+                )
+
+        for cause in ("cpu", "memory"):
+            with self.subTest(resource_cause=cause):
+                self.assertEqual(
+                    performance_health_state(
+                        slo_state="ok",
+                        resource_state="constrained",
+                        backpressure_state="ok",
+                        resource_protective=True,
+                    ),
+                    "protective",
                 )
 
     def test_latch_escalates_immediately_and_recovers_after_stable_hold(self) -> None:

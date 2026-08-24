@@ -20,7 +20,8 @@ from venus_evcharger.ports.gateway_diagnostics_validation import (
     positive_float,
 )
 
-GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 3
+GATEWAY_DIAGNOSTICS_SCHEMA_VERSION = 5
+_SUPPORTED_GATEWAY_DIAGNOSTICS_SCHEMA_VERSIONS = frozenset({3, 4, 5})
 
 
 class GatewayDiagnosticsUnavailable(RuntimeError):
@@ -87,12 +88,22 @@ class GatewayDiagnosticsSnapshot:
         return self.age_seconds(monotonic_at) <= maximum
 
     def to_payload(self) -> dict[str, object]:
+        health = self.health.to_payload()
+        if self.schema_version < 5:
+            health.pop("operational_state")
+            health.pop("performance_state")
+            health.pop("resource_state")
+            health.pop("protective_cause")
+            health.pop("resource_evidence")
+        if self.schema_version == 3:
+            health.pop("active_protective_trigger")
+            health.pop("last_protective_trigger")
         return {
             "schema_version": self.schema_version,
             "sequence": self.sequence,
             "captured_at": self.captured_at,
             "captured_monotonic": self.captured_monotonic,
-            "health": self.health.to_payload(),
+            "health": health,
             "discovery": self.discovery.to_payload(),
             "publication": self.publication.to_payload(),
             "ev_charger": [sample.to_payload() for sample in self.ev_charger],
@@ -114,7 +125,7 @@ class GatewayDiagnosticsSnapshot:
                 item["publication"]
             ),
             ev_charger=_samples(item["ev_charger"]),
-            schema_version=GATEWAY_DIAGNOSTICS_SCHEMA_VERSION,
+            schema_version=_schema_version(item["schema_version"]),
         )
 
 
@@ -159,7 +170,7 @@ def _snapshot_mapping(payload: object) -> Mapping[str, object]:
     # Diagnostics live under /run. After a schema change the active producer
     # replaces them on its next tick; inventing a monotonic timestamp for an
     # older document would make freshness and ordering unsafe.
-    if payload.get("schema_version") != GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
+    if payload.get("schema_version") not in _SUPPORTED_GATEWAY_DIAGNOSTICS_SCHEMA_VERSIONS:
         raise ValueError("gateway diagnostics has an unsupported schema_version")
     return exact_mapping(
         payload,
@@ -179,7 +190,7 @@ def _snapshot_mapping(payload: object) -> Mapping[str, object]:
 
 def _schema_version(value: object) -> int:
     version = non_negative_int(value, "gateway diagnostics schema_version")
-    if version != GATEWAY_DIAGNOSTICS_SCHEMA_VERSION:
+    if version not in _SUPPORTED_GATEWAY_DIAGNOSTICS_SCHEMA_VERSIONS:
         raise ValueError("gateway diagnostics has an unsupported schema_version")
     return version
 

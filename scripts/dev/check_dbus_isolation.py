@@ -13,7 +13,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 ADAPTER = REPO / "venus_evcharger_dbus_adapter.py"
 ADAPTER_PACKAGE = REPO / "venus_evcharger" / "dbus_adapter"
-CONNECTION_MANAGER = ADAPTER_PACKAGE / "rate.py"
+CONNECTION_MANAGER = ADAPTER_PACKAGE / "connection.py"
+DBUS_ERROR_CLASSIFIER = ADAPTER_PACKAGE / "dbus_errors.py"
 PUBLICATION_REGISTRY = ADAPTER_PACKAGE / "publication" / "registry.py"
 PROCESS_LOOP = ADAPTER_PACKAGE / "process" / "loop.py"
 ROOT_FILES = (
@@ -40,7 +41,7 @@ FORBIDDEN_CALLS = {
 }
 FORBIDDEN_NAMES = {"VeDbusService"}
 GATEWAY_IMPORT_OWNERS = {
-    "dbus": frozenset({CONNECTION_MANAGER}),
+    "dbus": frozenset({CONNECTION_MANAGER, DBUS_ERROR_CLASSIFIER}),
     "dbus.mainloop.glib": frozenset({PROCESS_LOOP}),
     "vedbus": frozenset({PUBLICATION_REGISTRY}),
 }

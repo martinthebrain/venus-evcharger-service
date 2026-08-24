@@ -36,6 +36,8 @@ with patch.dict(
     {"vedbus": _fake_vedbus, "dbus.mainloop.glib": _fake_dbus_mainloop},
 ):
     import venus_evcharger.dbus_adapter.rate as rate_module
+    import venus_evcharger.dbus_adapter.dbus_errors as dbus_errors_module
+    from venus_evcharger.dbus_adapter.connection import DbusConnectionManager
     from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
     import venus_evcharger.dbus_adapter.health.backpressure as health_backpressure_module
     import venus_evcharger.dbus_adapter.health.freshness as health_freshness_module
@@ -65,7 +67,6 @@ with patch.dict(
     import venus_evcharger_dbus_adapter as adapter_module
     from venus_evcharger.dbus_adapter.rate import (
         DbusCircuitBreaker,
-        DbusConnectionManager,
         DbusOperationDeferred,
         DbusRateLimiter,
     )
@@ -421,6 +422,7 @@ __all__ = [
     "process_loop_module",
     "process_socket_module",
     "rate_module",
+    "dbus_errors_module",
     "read_aggregate_module",
     "read_json_file",
     "read_module",

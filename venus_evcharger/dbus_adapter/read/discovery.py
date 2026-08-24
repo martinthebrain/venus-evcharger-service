@@ -200,6 +200,16 @@ class DbusEnergyDiscoveryManager:
             *self._pv_introspection_targets(),
         ]
 
+    def introspection_topology_signature(self) -> tuple[tuple[str, str, bool], ...]:
+        """Return the stable set and availability of introspection targets."""
+        advertised = self._advertising_services()
+        return tuple(
+            sorted(
+                (target.service, target.path, target.service in advertised)
+                for target in self.introspection_targets()
+            )
+        )
+
     def _source_descriptors(
         self,
         dormant_source_ids: frozenset[str] = frozenset(),

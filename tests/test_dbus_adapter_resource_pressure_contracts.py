@@ -38,6 +38,76 @@ class TestResourcePressureContracts(unittest.TestCase):
             "constrained",
         )
 
+    def test_constrained_evidence_preserves_original_causes_across_hysteresis(self) -> None:
+        latch = ResourceStateLatch(recovery_hold_seconds=5.0)
+        self.assertEqual(
+            latch.observe(
+                load_per_cpu=CONSTRAINED_LOAD_PER_CPU,
+                cpu_pct=CONSTRAINED_CPU_PERCENT,
+                mem_available_kb=CONSTRAINED_MEM_AVAILABLE_KB - 1.0,
+                now=10.0,
+                observed_at=1000.0,
+            ),
+            "constrained",
+        )
+        self.assertEqual(
+            latch.pressure_evidence_payload(),
+            {
+                "active": True,
+                "triggered_at": 1000.0,
+                "causes": ["load", "cpu", "memory"],
+                "load_per_cpu_1m": CONSTRAINED_LOAD_PER_CPU,
+                "system_cpu_pct": CONSTRAINED_CPU_PERCENT,
+                "mem_available_kb": CONSTRAINED_MEM_AVAILABLE_KB - 1.0,
+            },
+        )
+        latch.observe(
+            load_per_cpu=0.1,
+            cpu_pct=10.0,
+            mem_available_kb=100000.0,
+            now=11.0,
+            observed_at=1001.0,
+        )
+        active_evidence = latch.pressure_evidence_payload()
+        self.assertIsNotNone(active_evidence)
+        assert active_evidence is not None
+        self.assertTrue(active_evidence["active"])
+        latch.observe(
+            load_per_cpu=0.1,
+            cpu_pct=10.0,
+            mem_available_kb=100000.0,
+            now=16.0,
+            observed_at=1006.0,
+        )
+        inactive_evidence = latch.pressure_evidence_payload()
+        self.assertIsNotNone(inactive_evidence)
+        assert inactive_evidence is not None
+        self.assertFalse(inactive_evidence["active"])
+
+    def test_critical_cause_replaces_load_only_evidence_during_constrained_hold(self) -> None:
+        latch = ResourceStateLatch(recovery_hold_seconds=10.0)
+        latch.observe(
+            load_per_cpu=CONSTRAINED_LOAD_PER_CPU,
+            cpu_pct=10.0,
+            mem_available_kb=100000.0,
+            now=1.0,
+            observed_at=100.0,
+        )
+        latch.observe(
+            load_per_cpu=0.5,
+            cpu_pct=CONSTRAINED_CPU_PERCENT,
+            mem_available_kb=100000.0,
+            now=2.0,
+            observed_at=101.0,
+        )
+
+        evidence = latch.pressure_evidence_payload()
+        self.assertIsNotNone(evidence)
+        assert evidence is not None
+        self.assertEqual(evidence["triggered_at"], 101.0)
+        self.assertEqual(evidence["causes"], ["cpu"])
+        self.assertEqual(evidence["system_cpu_pct"], CONSTRAINED_CPU_PERCENT)
+
     def test_classification_thresholds_are_exact(self) -> None:
         self.assertEqual(resource_state(CONSTRAINED_LOAD_PER_CPU, 0.0, 100000.0), "constrained")
         self.assertEqual(resource_state(0.0, CONSTRAINED_CPU_PERCENT, 100000.0), "constrained")
