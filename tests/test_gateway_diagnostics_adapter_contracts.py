@@ -13,7 +13,11 @@ from tests.dbus_adapter_venus_stubs import install_venus_adapter_stubs
 
 install_venus_adapter_stubs()
 
-from venus_evcharger.dbus_adapter.process import diagnostics_summary, diagnostics_values
+from venus_evcharger.dbus_adapter.process import (
+    diagnostics_summary,
+    diagnostics_values,
+    resource_health,
+)
 from venus_evcharger.dbus_adapter.process.adapter import DbusAdapter
 from venus_evcharger.dbus_adapter.publication.registry import PublicationFieldObservation
 from venus_evcharger.dbus_gateway import gateway_paths
@@ -766,6 +770,7 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
         self.assertEqual(diagnostics_summary._non_negative_float(-2.0), 0.0)
         self.assertEqual(diagnostics_summary._non_negative_float(float("inf")), 0.0)
         self.assertEqual(diagnostics_summary._non_negative_float("2"), 0.0)
+        self.assertEqual(diagnostics_summary._resource_state("busy"), "busy")
         self.assertEqual(diagnostics_values._non_negative_integer("2"), 2)
         with self.assertRaises(TypeError):
             diagnostics_values._non_negative_integer(object())
@@ -778,6 +783,63 @@ class GatewayDiagnosticsAdapterContractsTests(unittest.TestCase):
             diagnostics_values._finite_float(float("nan"))
         with self.assertRaises(ValueError):
             diagnostics_values._non_negative_integer(-1)
+
+    def test_resource_health_reports_direct_critical_and_recovery_causes(self) -> None:
+        evidence = {"causes": ["load", "cpu", "memory", 1]}
+        self.assertIs(resource_health.resource_pressure_evidence({"pressure_evidence": evidence}), evidence)
+        self.assertIsNone(resource_health.resource_pressure_evidence({"pressure_evidence": []}))
+        self.assertTrue(resource_health.resource_pressure_is_protective("constrained", evidence))
+        self.assertFalse(resource_health.resource_pressure_is_protective("busy", evidence))
+        self.assertEqual(
+            resource_health.protective_cause(
+                aggregate_state="protective",
+                operational_state="protective",
+                backpressure_state="ok",
+                resource_protective=False,
+                resource_evidence=None,
+            ),
+            "circuit-breaker",
+        )
+        self.assertEqual(
+            resource_health.protective_cause(
+                aggregate_state="protective",
+                operational_state="ok",
+                backpressure_state="protective",
+                resource_protective=False,
+                resource_evidence=None,
+            ),
+            "backpressure",
+        )
+        self.assertEqual(
+            resource_health.protective_cause(
+                aggregate_state="protective",
+                operational_state="ok",
+                backpressure_state="ok",
+                resource_protective=True,
+                resource_evidence=evidence,
+            ),
+            "resource-cpu+memory",
+        )
+        self.assertEqual(
+            resource_health.protective_cause(
+                aggregate_state="protective",
+                operational_state="ok",
+                backpressure_state="ok",
+                resource_protective=True,
+                resource_evidence={"causes": "cpu"},
+            ),
+            "recovery-hold",
+        )
+        self.assertEqual(
+            resource_health.protective_cause(
+                aggregate_state="protective",
+                operational_state="ok",
+                backpressure_state="ok",
+                resource_protective=False,
+                resource_evidence=evidence,
+            ),
+            "recovery-hold",
+        )
 
     def test_missing_field_and_charging_fallback_keep_quality_explicit(self) -> None:
         unavailable = diagnostics_values._observed_sample(

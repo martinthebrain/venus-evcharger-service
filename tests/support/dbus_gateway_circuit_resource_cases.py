@@ -203,6 +203,18 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
                 raise RuntimeError("name unavailable")
 
         self.assertEqual(dbus_errors_module._dbus_error_name(_BrokenName("plain")), "")
+        self.assertEqual(
+            dbus_errors_module.dbus_error_code(
+                _NamedDbusTimeout("Org.Freedesktop.DBus.Error.NoReply")
+            ),
+            "org.freedesktop.dbus.error.noreply",
+        )
+        self.assertEqual(dbus_errors_module.dbus_error_code(TimeoutError()), "timeout")
+        self.assertEqual(dbus_errors_module.dbus_error_code(ValueError("plain")), "valueerror")
+        self.assertEqual(
+            dbus_errors_module._bounded_text(" x " * 200),
+            (" x " * 200).strip()[:256],
+        )
 
         breaker = DbusCircuitBreaker()
         breaker.protective_until = 100.0
@@ -223,6 +235,21 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         with patch.object(breaker, "state", return_value="degraded"):
             self.assertTrue(breaker.allows_priority("optional"))
             self.assertFalse(breaker.allows_priority("discovery"))
+
+        incomplete = DbusCircuitBreaker(protective_seconds=60.0)
+        incomplete._protective_until_monotonic = 200.0
+        incomplete._last_protective_trigger = None
+        event = rate_module._TimeoutEvent(
+            error=TimeoutError("timeout"),
+            kind="read",
+            source="source",
+            latency_ms=None,
+            monotonic_at=100.0,
+            captured_at=1000.0,
+        )
+        with patch.object(incomplete, "_active_protective_trigger", return_value=object()):
+            incomplete._record_protective_timeout(event, 7)
+        self.assertIsNone(incomplete._last_protective_trigger)
 
     def test_circuit_breaker_default_kind_and_health_summary_contracts(self) -> None:
         default_breaker = DbusCircuitBreaker()

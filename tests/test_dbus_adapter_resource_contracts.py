@@ -91,6 +91,30 @@ class _ResourceReader:
 
 
 class TestResourceMonitorContracts(unittest.TestCase):
+    def test_snapshot_copy_isolates_resource_evidence_only_for_text_lists(self) -> None:
+        causes = ["cpu"]
+        payload = {
+            "process": {"pid": 7},
+            "pressure_evidence": {"causes": causes},
+        }
+
+        copied = resources_module._snapshot_copy(payload)
+
+        self.assertEqual(copied, payload)
+        self.assertIsNot(copied["process"], payload["process"])
+        copied_evidence = copied["pressure_evidence"]
+        assert isinstance(copied_evidence, dict)
+        self.assertIsNot(copied_evidence, payload["pressure_evidence"])
+        self.assertIsNot(copied_evidence["causes"], causes)
+
+        tuple_causes = ("cpu",)
+        tuple_copy = resources_module._snapshot_copy(
+            {"pressure_evidence": {"causes": tuple_causes}}
+        )
+        tuple_evidence = tuple_copy["pressure_evidence"]
+        assert isinstance(tuple_evidence, dict)
+        self.assertIs(tuple_evidence["causes"], tuple_causes)
+
     def test_snapshot_copy_preserves_non_mapping_process_metadata(self) -> None:
         payload = {"state": "unknown", "process": "unavailable"}
 
