@@ -18,6 +18,7 @@ if _VELIB_PYTHON_PATH not in sys.path:
     sys.path.insert(1, _VELIB_PYTHON_PATH)
 
 from venus_evcharger.dbus_adapter.async_broker import DbusAsyncOperationBroker
+from venus_evcharger.dbus_adapter.connection import DbusConnectionManager
 from venus_evcharger.dbus_adapter.process.config import adapter_settings, load_adapter_config
 from venus_evcharger.dbus_adapter.process.diagnostics import DbusAdapterDiagnostics
 from venus_evcharger.dbus_adapter.process.health import DbusAdapterHealth
@@ -31,7 +32,7 @@ from venus_evcharger.dbus_adapter.process.runtime import DbusAdapterRuntime
 from venus_evcharger.dbus_adapter.process.socket import DbusAdapterSocket
 from venus_evcharger.dbus_adapter.process.write_context import DbusAdapterWriteContext
 from venus_evcharger.dbus_adapter.publication import GatewayPublicationRegistry
-from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusConnectionManager, DbusRateLimiter
+from venus_evcharger.dbus_adapter.rate import DbusCircuitBreaker, DbusRateLimiter
 from venus_evcharger.dbus_adapter.read.discovery import DbusEnergyDiscoveryManager
 from venus_evcharger.dbus_adapter.read.executor import DbusReadExecutor
 from venus_evcharger.dbus_adapter.resources import (
@@ -109,9 +110,7 @@ class DbusAdapter:
         self._last_resource_snapshot: CommandPayload = {}
         self.discovery = DbusDiscoveryManager(
             interval_seconds=settings.timing.service_list_interval_seconds,
-            missing_pv_interval_seconds=(
-                settings.timing.missing_pv_discovery_interval_seconds
-            ),
+            missing_pv_interval_seconds=(settings.timing.missing_pv_discovery_interval_seconds),
         )
         self.json_writer = AtomicJsonWriter()
         self.energy_publish_interval_seconds = settings.timing.energy_publish_interval_seconds
@@ -199,5 +198,6 @@ class DbusAdapter:
 
     def health_snapshot(self) -> CommandPayload:
         return self.health_role.health_snapshot()
+
 
 __all__ = ["DbusAdapter"]

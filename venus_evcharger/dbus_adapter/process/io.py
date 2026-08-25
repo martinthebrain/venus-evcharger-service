@@ -14,9 +14,10 @@ from typing import TypeGuard, TypeVar
 
 from venus_evcharger.dbus_adapter.async_broker import DbusMethodCall, dbus_call_operation
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
+from venus_evcharger.dbus_adapter.dbus_errors import DBUS_GATEWAY_OPERATION_ERRORS
 from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
-from venus_evcharger.dbus_adapter.rate import DBUS_GATEWAY_OPERATION_ERRORS, DbusOperationDeferred
+from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
 from venus_evcharger.dbus_adapter.read.keys import CORE_ENERGY_READ_KEYS, SEMANTIC_ENERGY_READ_KEYS
 from venus_evcharger.dbus_adapter.read.semantic import energy_inputs_snapshot
 from venus_evcharger.dbus_adapter.read.spec import ReadSpec, read_spec_stale_after_seconds
@@ -41,6 +42,7 @@ class DbusAdapterIo:
         if due is None:
             return False
         key, spec, interval = due
+
         def _complete(outcome: CommandOutcome) -> None:
             completed_at = time.monotonic()
             if outcome == "applied":
@@ -123,11 +125,14 @@ class DbusAdapterIo:
                 captured_at=captured_at,
             )
             return
+        previous_introspection_topology = context.energy_discovery.introspection_topology_signature()
         context.cache.update_services(services, now=captured_at)
         context.energy_discovery.update_services(
             services,
             captured_at=captured_at,
         )
+        if context.energy_discovery.introspection_topology_signature() != previous_introspection_topology:
+            context.introspection_role.request_background_scan()
         context.discovery.record_success(
             monotonic_at=monotonic_at,
             captured_at=captured_at,
@@ -160,11 +165,7 @@ class DbusAdapterIo:
         control_snapshot: GatewayControlSnapshot | None = None,
     ) -> None:
         context = self._context
-        control = (
-            context.health_role.control_snapshot()
-            if control_snapshot is None
-            else control_snapshot
-        )
+        control = context.health_role.control_snapshot() if control_snapshot is None else control_snapshot
         captured_at = control.captured_at
         context.cache.health.update(control.health)
         now = time.monotonic()
@@ -188,15 +189,12 @@ class DbusAdapterIo:
             context.energy_publish_interval_seconds,
         ):
             values: dict[str, Mapping[str, object]] = {
-                key: dict(context.cache.values.get(key, {}))
-                for key in SEMANTIC_ENERGY_READ_KEYS
+                key: dict(context.cache.values.get(key, {})) for key in SEMANTIC_ENERGY_READ_KEYS
             }
             sequence = context.cache.sequence
             snapshot_captured_at = time.time()
             snapshot_captured_monotonic = time.monotonic()
-            topology = context.energy_discovery.topology_snapshot(
-                captured_at=snapshot_captured_at
-            )
+            topology = context.energy_discovery.topology_snapshot(captured_at=snapshot_captured_at)
             inputs = energy_inputs_snapshot(
                 values,
                 context.energy_discovery,
@@ -217,9 +215,7 @@ class DbusAdapterIo:
     ) -> EnergyTopologySnapshot | None:
         context = self._context
         if context.energy_discovery.generation != context._last_topology_generation:
-            topology = topology or context.energy_discovery.topology_snapshot(
-                captured_at=captured_at
-            )
+            topology = topology or context.energy_discovery.topology_snapshot(captured_at=captured_at)
             context.cache.set_energy_topology_snapshot(topology)
             context.cache.write_energy_topology_snapshot()
             context._last_topology_generation = topology.generation
@@ -238,9 +234,7 @@ class DbusAdapterIo:
             context._last_health_publish_monotonic,
             context.health_publish_interval_seconds,
         ):
-            topology = topology or context.energy_discovery.topology_snapshot(
-                captured_at=control.captured_at
-            )
+            topology = topology or context.energy_discovery.topology_snapshot(captured_at=control.captured_at)
             context.cache.write_health_snapshot(now=control.captured_at)
             context.diagnostics_role.write_gateway_diagnostics(
                 health=control.health,
@@ -261,9 +255,7 @@ class DbusAdapterIo:
     ) -> None:
         context = self._context
         if self._full_cache_publish_due(now):
-            topology = topology or context.energy_discovery.topology_snapshot(
-                captured_at=captured_at
-            )
+            topology = topology or context.energy_discovery.topology_snapshot(captured_at=captured_at)
             context.cache.set_energy_topology_snapshot(topology)
             context.cache.write_cache_snapshot(now=captured_at)
             context._last_cache_publish_monotonic = now
@@ -274,8 +266,7 @@ class DbusAdapterIo:
         context = self._context
         elapsed = now - context._last_cache_publish_monotonic
         heartbeat_due = (
-            context._last_cache_publish_monotonic <= 0.0
-            or elapsed >= context.cache_publish_interval_seconds
+            context._last_cache_publish_monotonic <= 0.0 or elapsed >= context.cache_publish_interval_seconds
         )
         dirty = context.cache.sequence != context._last_cache_publish_sequence
         dirty_due = dirty and elapsed >= context.cache_dirty_publish_interval_seconds

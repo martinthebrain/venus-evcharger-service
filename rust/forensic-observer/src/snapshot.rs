@@ -14,6 +14,7 @@ use crate::command::{
 use crate::config::{BackendSelection, BackendSelectionPayload, ObserverConfig};
 use crate::gateway::GatewayDiagnostics;
 use crate::probe::{BackendProbe, BackendProbeResult};
+use crate::system_activity::SystemActivity;
 
 const RUNTIME_LOG_DIR: &str = "/var/volatile/log/dbus-venus-evcharger";
 const LOG_TAIL_BYTES: usize = 20_000;
@@ -85,6 +86,8 @@ pub struct ForensicSnapshot {
     pub svstat: CommandPayload,
     ps: CommandPayload,
     uptime: CommandPayload,
+    /// Process and CPU deltas covering the interval before this snapshot.
+    pub system_activity: SystemActivity,
     runtime_logs: BTreeMap<String, String>,
     /// Stable markers found in bounded runtime logs.
     pub trace_markers: Vec<String>,
@@ -94,6 +97,21 @@ impl ForensicSnapshot {
     /// Collect every bounded read-only source for one observer cycle.
     #[must_use]
     pub fn collect(config: &ObserverConfig) -> Self {
+        Self::collect_with_system_activity(
+            config,
+            SystemActivity::Unavailable {
+                reason_code: "interval-sample-unavailable".to_owned(),
+                error: "no preceding process sample was supplied".to_owned(),
+            },
+        )
+    }
+
+    /// Collect one snapshot with process deltas from the observer runtime.
+    #[must_use]
+    pub fn collect_with_system_activity(
+        config: &ObserverConfig,
+        system_activity: SystemActivity,
+    ) -> Self {
         let selection = config.backend_selection();
         let backend_diagnostics = backend_payload(selection.as_ref());
         let probe = BackendProbe::configured(config, selection.as_ref().ok()).probe();
@@ -116,6 +134,7 @@ impl ForensicSnapshot {
             ),
             ps,
             uptime: command_output(&["uptime"], COMMAND_TIMEOUT),
+            system_activity,
             trace_markers: runtime_markers(&runtime_logs),
             runtime_logs,
         }
@@ -231,6 +250,7 @@ mod tests {
     use super::{ForensicSnapshot, GatewayDiagnosticsPayload, slug_text};
     use crate::command::CommandPayload;
     use crate::probe::BackendProbeResult;
+    use crate::system_activity::SystemActivity;
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::fs;
@@ -268,6 +288,10 @@ mod tests {
             },
             uptime: CommandPayload::Error {
                 ok: false,
+                error: "test".to_owned(),
+            },
+            system_activity: SystemActivity::Unavailable {
+                reason_code: "test".to_owned(),
                 error: "test".to_owned(),
             },
             runtime_logs: BTreeMap::new(),
@@ -367,6 +391,7 @@ mod tests {
                 "runtime_logs",
                 "runtime_state",
                 "svstat",
+                "system_activity",
                 "timestamp",
                 "trace_markers",
                 "uptime",

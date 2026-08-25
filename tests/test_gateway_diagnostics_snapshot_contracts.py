@@ -44,6 +44,8 @@ class GatewayDiagnosticsSnapshotContractsTests(unittest.TestCase):
 
     def test_schema_version_parser_accepts_only_the_current_domain(self) -> None:
         self.assertEqual(diagnostics_contract._schema_version(3), 3)
+        self.assertEqual(diagnostics_contract._schema_version(4), 4)
+        self.assertEqual(diagnostics_contract._schema_version(5), 5)
         with self.assertRaisesRegex(
             TypeError,
             "^gateway diagnostics schema_version must be an integer$",

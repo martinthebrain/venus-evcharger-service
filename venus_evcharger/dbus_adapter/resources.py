@@ -8,12 +8,13 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from math import isfinite
-from typing import TypeGuard
+from typing import TypeGuard, TypeVar, cast
 
 from venus_evcharger.dbus_adapter import resource_metrics, resource_pressure, resource_procfs
 from venus_evcharger.ipc.command_types import CommandPayload
 
 DEFAULT_MEMORY_STALE_SECONDS = 10.0
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,13 +65,18 @@ class ResourceMonitor:
         settings: ResourceMonitorSettings | None = None,
         reader: resource_procfs.ResourceReader | None = None,
         monotonic: Callable[[], float] | None = None,
+        wall_clock: Callable[[], float] | None = None,
     ) -> None:
-        policy = settings if settings is not None else ResourceMonitorSettings()
-        self.pid = os.getpid() if pid is None else int(pid)
+        policy = _or_default(settings, ResourceMonitorSettings)
+        self.pid = _resolved_pid(pid)
         self.sample_interval_seconds = policy.sample_interval_seconds
         self.memory_stale_seconds = policy.memory_stale_seconds
-        self._reader = reader if reader is not None else resource_procfs.ProcfsResourceReader(self.pid)
-        self._monotonic = monotonic if monotonic is not None else time.monotonic
+        self._reader = _or_default(
+            reader,
+            lambda: resource_procfs.ProcfsResourceReader(self.pid),
+        )
+        self._monotonic = _or_default(monotonic, lambda: time.monotonic)
+        self._wall_clock = _or_default(wall_clock, lambda: time.time)
         self._cpu_usage = resource_metrics.CpuUsageTracker()
         self._state = resource_pressure.ResourceStateLatch(
             recovery_hold_seconds=policy.recovery_hold_seconds,
@@ -89,8 +95,10 @@ class ResourceMonitor:
             cpu_pct=metrics.system_cpu_pct,
             mem_available_kb=metrics.mem_available_kb,
             now=now,
+            observed_at=self._wall_clock(),
         )
         payload = metrics.payload(pid=self.pid, state=state)
+        payload["pressure_evidence"] = self._state.pressure_evidence_payload()
         self._snapshot_cache = _SnapshotCache(payload, now + self.sample_interval_seconds)
         return _snapshot_copy(payload)
 
@@ -160,12 +168,7 @@ def _memory_values(
 
 
 def _physical_memory_values(total: float, available: float) -> bool:
-    return (
-        isfinite(total)
-        and isfinite(available)
-        and total > 0.0
-        and 0.0 <= available <= total
-    )
+    return isfinite(total) and isfinite(available) and total > 0.0 and 0.0 <= available <= total
 
 
 def _snapshot_copy(payload: CommandPayload) -> CommandPayload:
@@ -173,8 +176,29 @@ def _snapshot_copy(payload: CommandPayload) -> CommandPayload:
     process = payload.get("process")
     if _is_object_mapping(process):
         copied["process"] = dict(process)
+    pressure_evidence = payload.get("pressure_evidence")
+    if _is_object_mapping(pressure_evidence):
+        evidence_copy = dict(pressure_evidence)
+        causes = pressure_evidence.get("causes")
+        if _is_text_list(causes):
+            evidence_copy["causes"] = list(causes)
+        copied["pressure_evidence"] = evidence_copy
     return copied
 
 
 def _is_object_mapping(value: object) -> TypeGuard[Mapping[object, object]]:
     return isinstance(value, Mapping)
+
+
+def _is_text_list(value: object) -> TypeGuard[list[str]]:
+    if not isinstance(value, list):
+        return False
+    return all(isinstance(item, str) for item in cast(list[object], value))
+
+
+def _resolved_pid(pid: int | None) -> int:
+    return os.getpid() if pid is None else int(pid)
+
+
+def _or_default(value: _T | None, factory: Callable[[], _T]) -> _T:
+    return factory() if value is None else value

@@ -39,6 +39,10 @@ EMPTY_LATENCY_SUMMARY = _latency_summary(
     p99=0.0,
     maximum=0.0,
 )
+EMPTY_PROTECTIVE_EVIDENCE = {
+    "active_protective_trigger": None,
+    "last_protective_trigger": None,
+}
 
 
 class _Clock:
@@ -103,6 +107,7 @@ class DbusAdapterRateAsyncContractTests(unittest.TestCase):
                 "degraded_until": 0.0,
                 "last_success_at": 0.0,
                 "last_error": "",
+                **EMPTY_PROTECTIVE_EVIDENCE,
                 "errors_60s": 0,
                 "successes_60s": 0,
                 "consecutive_failures": 0,
@@ -147,6 +152,7 @@ class DbusAdapterRateAsyncContractTests(unittest.TestCase):
                 "degraded_until": 0.0,
                 "last_success_at": 1001.0,
                 "last_error": "",
+                **EMPTY_PROTECTIVE_EVIDENCE,
                 "errors_60s": 1,
                 "successes_60s": 1,
                 "consecutive_failures": 0,
@@ -197,6 +203,7 @@ class DbusAdapterRateAsyncContractTests(unittest.TestCase):
                 "degraded_until": 0.0,
                 "last_success_at": 0.0,
                 "last_error": "timed out",
+                **EMPTY_PROTECTIVE_EVIDENCE,
                 "errors_60s": 3,
                 "successes_60s": 0,
                 "consecutive_failures": 3,
@@ -245,6 +252,7 @@ class DbusAdapterRateAsyncContractTests(unittest.TestCase):
                 "degraded_until": 0.0,
                 "last_success_at": 0.0,
                 "last_error": "source timeout",
+                **EMPTY_PROTECTIVE_EVIDENCE,
                 "errors_60s": 0,
                 "successes_60s": 0,
                 "consecutive_failures": 1,
@@ -335,6 +343,7 @@ class DbusAdapterRateAsyncContractTests(unittest.TestCase):
                 "degraded_until": 0.0,
                 "last_success_at": 0.0,
                 "last_error": "",
+                **EMPTY_PROTECTIVE_EVIDENCE,
                 "errors_60s": 0,
                 "successes_60s": 0,
                 "consecutive_failures": 0,
@@ -392,6 +401,7 @@ class DbusAdapterRateAsyncContractTests(unittest.TestCase):
                 "degraded_until": 0.0,
                 "last_success_at": 0.0,
                 "last_error": "",
+                **EMPTY_PROTECTIVE_EVIDENCE,
                 "errors_60s": 0,
                 "successes_60s": 0,
                 "consecutive_failures": 0,

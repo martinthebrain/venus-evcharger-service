@@ -10,11 +10,13 @@ from tests.support.dbus_gateway_adapter_harness import (
     MagicMock,
     ResourceMonitor,
     TickHealth,
+    dbus_errors_module,
     install_mock,
     patch,
     rate_module,
 )
 from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
+import venus_evcharger.dbus_adapter.connection as connection_module
 from venus_evcharger.dbus_adapter.resource_pressure import resource_state
 from venus_evcharger.dbus_adapter.resources import ResourceMonitorSettings
 
@@ -26,14 +28,14 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         class _CustomDbusError(Exception):
             pass
 
-        with patch.object(rate_module.dbus, "DBusException", _CustomDbusError, create=True):
-            self.assertIs(rate_module._dbus_exception_type(), _CustomDbusError)
-        with patch.object(rate_module.dbus, "DBusException", object, create=True):
-            self.assertIs(rate_module._dbus_exception_type(), RuntimeError)
-        with patch.object(rate_module.dbus, "DBusException", "bad", create=True):
-            self.assertIs(rate_module._dbus_exception_type(), RuntimeError)
-        with patch.object(rate_module, "dbus", object()):
-            self.assertIs(rate_module._dbus_exception_type(), RuntimeError)
+        with patch.object(dbus_errors_module.dbus, "DBusException", _CustomDbusError, create=True):
+            self.assertIs(dbus_errors_module._dbus_exception_type(), _CustomDbusError)
+        with patch.object(dbus_errors_module.dbus, "DBusException", object, create=True):
+            self.assertIs(dbus_errors_module._dbus_exception_type(), RuntimeError)
+        with patch.object(dbus_errors_module.dbus, "DBusException", "bad", create=True):
+            self.assertIs(dbus_errors_module._dbus_exception_type(), RuntimeError)
+        with patch.object(dbus_errors_module, "dbus", object()):
+            self.assertIs(dbus_errors_module._dbus_exception_type(), RuntimeError)
         self.assertEqual(rate_module._normalized_kind(" read "), "read")
         self.assertEqual(rate_module._normalized_kind("  "), "dbus")
         self.assertEqual(rate_module._normalized_priority(" USER "), "user")
@@ -186,15 +188,33 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         self.assertTrue(DbusCircuitBreaker._looks_like_timeout(RuntimeError("no_reply from dbus")))
         self.assertTrue(DbusCircuitBreaker._looks_like_timeout(_NamedDbusTimeout("org.freedesktop.DBus.Error.NoReply")))
         self.assertFalse(DbusCircuitBreaker._looks_like_timeout(RuntimeError("plain failure")))
-        self.assertEqual(rate_module._dbus_error_name(_NamedDbusTimeout("Example.Error")), "example.error")
-        self.assertEqual(rate_module._dbus_error_name(RuntimeError("plain")), "")
-        self.assertEqual(rate_module._dbus_error_name(_NamedDbusTimeout(RuntimeError("bad"))), "bad")
+        self.assertEqual(
+            dbus_errors_module._dbus_error_name(_NamedDbusTimeout("Example.Error")),
+            "example.error",
+        )
+        self.assertEqual(dbus_errors_module._dbus_error_name(RuntimeError("plain")), "")
+        self.assertEqual(
+            dbus_errors_module._dbus_error_name(_NamedDbusTimeout(RuntimeError("bad"))),
+            "bad",
+        )
 
         class _BrokenName(Exception):
             def get_dbus_name(self) -> str:
                 raise RuntimeError("name unavailable")
 
-        self.assertEqual(rate_module._dbus_error_name(_BrokenName("plain")), "")
+        self.assertEqual(dbus_errors_module._dbus_error_name(_BrokenName("plain")), "")
+        self.assertEqual(
+            dbus_errors_module.dbus_error_code(
+                _NamedDbusTimeout("Org.Freedesktop.DBus.Error.NoReply")
+            ),
+            "org.freedesktop.dbus.error.noreply",
+        )
+        self.assertEqual(dbus_errors_module.dbus_error_code(TimeoutError()), "timeout")
+        self.assertEqual(dbus_errors_module.dbus_error_code(ValueError("plain")), "valueerror")
+        self.assertEqual(
+            dbus_errors_module._bounded_text(" x " * 200),
+            (" x " * 200).strip()[:256],
+        )
 
         breaker = DbusCircuitBreaker()
         breaker.protective_until = 100.0
@@ -215,6 +235,21 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         with patch.object(breaker, "state", return_value="degraded"):
             self.assertTrue(breaker.allows_priority("optional"))
             self.assertFalse(breaker.allows_priority("discovery"))
+
+        incomplete = DbusCircuitBreaker(protective_seconds=60.0)
+        incomplete._protective_until_monotonic = 200.0
+        incomplete._last_protective_trigger = None
+        event = rate_module._TimeoutEvent(
+            error=TimeoutError("timeout"),
+            kind="read",
+            source="source",
+            latency_ms=None,
+            monotonic_at=100.0,
+            captured_at=1000.0,
+        )
+        with patch.object(incomplete, "_active_protective_trigger", return_value=object()):
+            incomplete._record_protective_timeout(event, 7)
+        self.assertIsNone(incomplete._last_protective_trigger)
 
     def test_circuit_breaker_default_kind_and_health_summary_contracts(self) -> None:
         default_breaker = DbusCircuitBreaker()
@@ -278,6 +313,61 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         self.assertEqual(health["operations"], {"read": read_summary})
         self.assertEqual(health["avg_latency_ms"], 1.5)
         self.assertEqual(health["timeouts_60s"], 2)
+
+    def test_protective_trigger_evidence_survives_recovery_and_timeout_pruning(self) -> None:
+        breaker = DbusCircuitBreaker(protective_seconds=180.0)
+        source = "com.example.energy/Ac/Power"
+        with (
+            patch.object(rate_module.time, "time", return_value=1000.0),
+            patch.object(rate_module.time, "monotonic", return_value=100.0),
+        ):
+            for _index in range(6):
+                breaker.record_error(
+                    TimeoutError("sensitive timeout detail"),
+                    kind="optional_read",
+                    source=source,
+                    latency_ms=750.0,
+                )
+            triggered = breaker.health()
+
+        expected = {
+            "triggered_at": 1000.0,
+            "protective_until": 1180.0,
+            "timeout_count_60s": 6,
+            "operation_kind": "optional_read",
+            "source": source,
+            "error_code": "timeout",
+            "latency_ms": 750.0,
+        }
+        self.assertEqual(triggered["active_protective_trigger"], expected)
+        self.assertEqual(triggered["last_protective_trigger"], expected)
+        self.assertNotIn("sensitive timeout detail", str(expected))
+
+        with (
+            patch.object(rate_module.time, "time", return_value=1010.0),
+            patch.object(rate_module.time, "monotonic", return_value=110.0),
+        ):
+            breaker.record_success(2.0, kind="read", source="healthy/source")
+            recovered = breaker.health()
+        self.assertEqual(recovered["last_error"], "")
+        self.assertEqual(recovered["active_protective_trigger"], expected)
+
+        with (
+            patch.object(rate_module.time, "time", return_value=1070.0),
+            patch.object(rate_module.time, "monotonic", return_value=170.0),
+        ):
+            pruned = breaker.health()
+        self.assertEqual(pruned["timeouts_60s"], 0)
+        self.assertEqual(pruned["active_protective_trigger"], expected)
+
+        with (
+            patch.object(rate_module.time, "time", return_value=1180.0),
+            patch.object(rate_module.time, "monotonic", return_value=280.0),
+        ):
+            expired = breaker.health()
+        self.assertEqual(expired["state"], "ok")
+        self.assertIsNone(expired["active_protective_trigger"])
+        self.assertEqual(expired["last_protective_trigger"], expected)
 
     def test_circuit_source_attribution_slowdown_and_monotonic_deadlines(self) -> None:
         breaker = DbusCircuitBreaker()
@@ -373,7 +463,11 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
         fake_bus.call_async.return_value = pending
         reply = MagicMock()
         error = MagicMock()
-        with patch.object(rate_module.dbus, "SystemBus", MagicMock(return_value=fake_bus)) as system_bus:
+        with patch.object(
+            connection_module.dbus,
+            "SystemBus",
+            MagicMock(return_value=fake_bus),
+        ) as system_bus:
             self.assertIs(manager.bus(), fake_bus)
             self.assertIs(manager.bus(), fake_bus)
             manager.connect()
@@ -478,7 +572,11 @@ class GatewayCircuitResourceCases(GatewayAdapterContractCase):
     def test_connection_manager_creates_private_bus_and_resets_best_effort(self) -> None:
         manager = DbusConnectionManager()
         fake_bus = MagicMock()
-        with patch.object(rate_module.dbus, "SystemBus", return_value=fake_bus) as system_bus:
+        with patch.object(
+            connection_module.dbus,
+            "SystemBus",
+            return_value=fake_bus,
+        ) as system_bus:
             self.assertIs(manager.bus(), fake_bus)
             self.assertIs(manager.bus(), fake_bus)
             system_bus.assert_called_once_with(private=True)

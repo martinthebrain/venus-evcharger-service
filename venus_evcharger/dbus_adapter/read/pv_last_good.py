@@ -8,7 +8,7 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
-from venus_evcharger.dbus_adapter.rate import dbus_error_is_timeout
+from venus_evcharger.dbus_adapter.dbus_errors import dbus_error_is_timeout
 from venus_evcharger.dbus_adapter.read.aggregate import (
     PV_TOTAL_AGGREGATE,
     AggregateState,
@@ -152,11 +152,7 @@ class PvAggregateContinuity:
         self._window.retain_members(candidates)
         self._candidates_by_key[key] = candidates
         in_progress = self._aggregates.signature_members(key, PV_TOTAL_AGGREGATE)
-        members = tuple(
-            in_progress
-            if in_progress is not None
-            else self._adapter.energy_discovery.pv_members(spec)
-        )
+        members = tuple(in_progress if in_progress is not None else self._adapter.energy_discovery.pv_members(spec))
         if members:
             return members, None
         state = self._aggregates.state_for(
@@ -239,11 +235,7 @@ class PvAggregateContinuity:
 
     def _available_estimates(self, key: str) -> tuple[PvHoldEstimate, ...]:
         advertised = self._adapter.cache.services
-        candidates = tuple(
-            member
-            for member in self._candidates_by_key.get(key, ())
-            if member[0] in advertised
-        )
+        candidates = tuple(member for member in self._candidates_by_key.get(key, ()) if member[0] in advertised)
         return self._window.estimates(candidates)
 
     def discard(self, key: str) -> None:

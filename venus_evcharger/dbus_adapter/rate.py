@@ -5,29 +5,14 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from collections.abc import Callable
-from contextlib import suppress
+from dataclasses import dataclass, replace
 
-import dbus
-
-from venus_evcharger.dbus_adapter.async_request import DbusWireRequest
+from venus_evcharger.dbus_adapter.dbus_errors import dbus_error_code, dbus_error_is_timeout
 from venus_evcharger.dbus_gateway import LatencyWindow
 from venus_evcharger.dbus_gateway_latency import BoundedLatencyAttribution
 from venus_evcharger.ipc.command_types import CommandPayload
 
 DBUS_OPERATION_KIND = "dbus"
-DBUS_EXCEPTION_ATTRIBUTE = "DBusException"
-
-
-def _dbus_exception_type() -> type[BaseException]:
-    if not hasattr(dbus, DBUS_EXCEPTION_ATTRIBUTE):
-        return RuntimeError
-    candidate = getattr(dbus, DBUS_EXCEPTION_ATTRIBUTE)
-    if isinstance(candidate, type) and issubclass(candidate, BaseException):
-        return candidate
-    return RuntimeError
-
-
 DBUS_DEGRADED_TIMEOUTS_PER_MINUTE = 3
 DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE = 5
 DBUS_LATENCY_OPERATION_KIND_LIMIT = 8
@@ -49,13 +34,41 @@ PRIORITY_RANKS = {
 PROTECTIVE_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["read"]
 DEGRADED_MAX_ALLOWED_PRIORITY_RANK = PRIORITY_RANKS["optional"]
 DEFAULT_PRIORITY_RANK = PRIORITY_RANKS["diagnostic"]
-DBUS_GATEWAY_OPERATION_ERRORS: tuple[type[BaseException], ...] = (
-    _dbus_exception_type(),
-    OSError,
-    RuntimeError,
-    TypeError,
-    ValueError,
-)
+
+
+@dataclass(frozen=True, slots=True)
+class ProtectiveTriggerEvidence:
+    """Bounded evidence retained for the most recent protective transition."""
+
+    triggered_at: float
+    protective_until: float
+    timeout_count_60s: int
+    operation_kind: str
+    source: str
+    error_code: str
+    latency_ms: float | None
+
+    def to_payload(self) -> CommandPayload:
+        """Return the transport-neutral health representation."""
+        return {
+            "triggered_at": self.triggered_at,
+            "protective_until": self.protective_until,
+            "timeout_count_60s": self.timeout_count_60s,
+            "operation_kind": self.operation_kind,
+            "source": self.source,
+            "error_code": self.error_code,
+            "latency_ms": self.latency_ms,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class _TimeoutEvent:
+    error: BaseException
+    kind: str
+    source: str
+    latency_ms: float | None
+    monotonic_at: float
+    captured_at: float
 
 
 def _normalized_kind(kind: str) -> str:
@@ -129,6 +142,7 @@ class DbusCircuitBreaker:
         self._errors: deque[tuple[float, str]] = deque()
         self._successes: deque[tuple[float, str]] = deque()
         self.consecutive_failures = 0
+        self._last_protective_trigger: ProtectiveTriggerEvidence | None = None
 
     @property
     def degraded_until(self) -> float:
@@ -137,9 +151,7 @@ class DbusCircuitBreaker:
     @degraded_until.setter
     def degraded_until(self, value: float) -> None:
         self._degraded_until_epoch = max(0.0, float(value))
-        self._degraded_until_monotonic = _epoch_deadline_to_monotonic(
-            self._degraded_until_epoch
-        )
+        self._degraded_until_monotonic = _epoch_deadline_to_monotonic(self._degraded_until_epoch)
 
     @property
     def protective_until(self) -> float:
@@ -148,9 +160,7 @@ class DbusCircuitBreaker:
     @protective_until.setter
     def protective_until(self, value: float) -> None:
         self._protective_until_epoch = max(0.0, float(value))
-        self._protective_until_monotonic = _epoch_deadline_to_monotonic(
-            self._protective_until_epoch
-        )
+        self._protective_until_monotonic = _epoch_deadline_to_monotonic(self._protective_until_epoch)
 
     def record_success(
         self,
@@ -197,22 +207,54 @@ class DbusCircuitBreaker:
                 monotonic_at=monotonic_at,
             )
         if self._looks_like_timeout(error):
-            self._record_timeout(
-                kind=normalized_kind,
-                source=source,
-                monotonic_at=monotonic_at,
+            self._record_timeout_error(
+                _TimeoutEvent(
+                    error=error,
+                    kind=normalized_kind,
+                    source=source,
+                    latency_ms=latency_ms,
+                    monotonic_at=monotonic_at,
+                    captured_at=captured_at,
+                )
             )
-            count = self.latencies.summary(now=monotonic_at)["timeouts_60s"]
-            if count > DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE:
-                self._extend_protective_deadline(
-                    monotonic_at=monotonic_at,
-                    captured_at=captured_at,
-                )
-            elif count >= DBUS_DEGRADED_TIMEOUTS_PER_MINUTE:
-                self._extend_degraded_deadline(
-                    monotonic_at=monotonic_at,
-                    captured_at=captured_at,
-                )
+
+    def _record_timeout_error(self, event: _TimeoutEvent) -> None:
+        self._record_timeout(
+            kind=event.kind,
+            source=event.source,
+            monotonic_at=event.monotonic_at,
+        )
+        count = self.latencies.summary(now=event.monotonic_at)["timeouts_60s"]
+        if count > DBUS_PROTECTIVE_TIMEOUTS_PER_MINUTE:
+            self._record_protective_timeout(event, count)
+        elif count >= DBUS_DEGRADED_TIMEOUTS_PER_MINUTE:
+            self._extend_degraded_deadline(
+                monotonic_at=event.monotonic_at,
+                captured_at=event.captured_at,
+            )
+
+    def _record_protective_timeout(self, event: _TimeoutEvent, count: int) -> None:
+        was_protective = event.monotonic_at < self._protective_until_monotonic
+        self._extend_protective_deadline(
+            monotonic_at=event.monotonic_at,
+            captured_at=event.captured_at,
+        )
+        if not was_protective or self._active_protective_trigger(event.monotonic_at) is None:
+            self._last_protective_trigger = ProtectiveTriggerEvidence(
+                triggered_at=event.captured_at,
+                protective_until=self.protective_until,
+                timeout_count_60s=count,
+                operation_kind=event.kind,
+                source=_bounded_diagnostic_text(event.source),
+                error_code=dbus_error_code(event.error),
+                latency_ms=(None if event.latency_ms is None else max(0.0, float(event.latency_ms))),
+            )
+            return
+        if self._last_protective_trigger is not None:
+            self._last_protective_trigger = replace(
+                self._last_protective_trigger,
+                protective_until=self.protective_until,
+            )
 
     def state(
         self,
@@ -242,24 +284,32 @@ class DbusCircuitBreaker:
         monotonic_at = time.monotonic()
         self._prune_events(monotonic_at)
         summary = self.latencies.summary(now=monotonic_at)
-        operations = {
-            kind: window.summary(now=monotonic_at)
-            for kind, window in sorted(self.latencies_by_kind.items())
-        }
+        active_trigger = self._active_protective_trigger(monotonic_at)
+        operations = {kind: window.summary(now=monotonic_at) for kind, window in sorted(self.latencies_by_kind.items())}
         return {
             "state": self.state(),
             "degraded_until": max(self.degraded_until, self.protective_until),
             "last_success_at": self.last_success_at,
             "last_error": self.last_error,
+            "active_protective_trigger": (None if active_trigger is None else active_trigger.to_payload()),
+            "last_protective_trigger": (
+                None if self._last_protective_trigger is None else self._last_protective_trigger.to_payload()
+            ),
             "errors_60s": len(self._errors),
             "successes_60s": len(self._successes),
             "consecutive_failures": self.consecutive_failures,
             "operations": operations,
-            "operation_sources": self.latencies_by_source.summary(
-                now=monotonic_at
-            ),
+            "operation_sources": self.latencies_by_source.summary(now=monotonic_at),
             **summary,
         }
+
+    def _active_protective_trigger(
+        self,
+        monotonic_at: float,
+    ) -> ProtectiveTriggerEvidence | None:
+        if monotonic_at >= self._protective_until_monotonic:
+            return None
+        return self._last_protective_trigger
 
     def optional_source_interval_factor(self, source: str) -> float:
         """Return a conservative scheduler multiplier for one optional source."""
@@ -379,68 +429,5 @@ class DbusCircuitBreaker:
         return dbus_error_is_timeout(error)
 
 
-class DbusConnectionManager:
-    """Own the private system bus connection."""
-
-    def __init__(self) -> None:
-        self._bus: object | None = None
-
-    def bus(self) -> object:
-        if self._bus is None:
-            self._bus = dbus.SystemBus(private=True)
-        return self._bus
-
-    def connect(self) -> None:
-        """Establish the private bus connection before the GLib loop starts."""
-        self.bus()
-
-    def send_async(
-        self,
-        request: DbusWireRequest,
-        reply_handler: Callable[..., None],
-        error_handler: Callable[[object], None],
-    ) -> object:
-        """Return the real dbus-python PendingCall for one bounded request."""
-        raw_call_async = getattr(self.bus(), "call_async", None)
-        if not callable(raw_call_async):
-            raise TypeError("DBus bus does not provide call_async")
-        call_async: Callable[..., object] = raw_call_async
-        return call_async(
-            request.service,
-            request.path,
-            request.interface,
-            request.method_name,
-            request.signature,
-            request.args,
-            reply_handler,
-            error_handler,
-            timeout=request.timeout_seconds,
-            require_main_loop=True,
-        )
-
-    def reset(self) -> None:
-        close = getattr(self._bus, "close", None)
-        if callable(close):
-            with suppress(Exception):
-                close()
-        self._bus = None
-
-
-def dbus_error_is_timeout(error: BaseException) -> bool:
-    """Return whether a DBus failure represents a transient missing reply."""
-    if isinstance(error, TimeoutError):
-        return True
-    detail = str(error).lower()
-    name = _dbus_error_name(error)
-    reply_markers = ("timeout", "timed out", "noreply", "no_reply")
-    return any(marker in detail for marker in reply_markers) or "noreply" in name
-
-
-def _dbus_error_name(error: BaseException) -> str:
-    getter = getattr(error, "get_dbus_name", None)
-    if not callable(getter):
-        return ""
-    try:
-        return str(getter()).lower()
-    except DBUS_GATEWAY_OPERATION_ERRORS:
-        return ""
+def _bounded_diagnostic_text(value: object, *, maximum: int = 256) -> str:
+    return str(value).strip()[:maximum]

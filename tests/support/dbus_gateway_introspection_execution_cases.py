@@ -26,6 +26,36 @@ from venus_evcharger.ipc.energy import EnergyRefreshRequest
 class GatewayIntrospectionExecutionCases(GatewayAdapterContractCase):
     """Exercise introspection execution and snapshot contracts."""
 
+    def test_only_relevant_service_topology_changes_request_introspection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "config.ini"
+            config_path.write_text(
+                "[DEFAULT]\n"
+                "AutoGridService=com.victronenergy.system\n"
+                "AutoBatteryServicePrefix=com.victronenergy.battery.\n"
+                "AutoPvServicePrefix=com.victronenergy.pvinverter.\n",
+                encoding="utf-8",
+            )
+            adapter = DbusAdapter(str(config_path), paths=gateway_paths(str(Path(temp_dir) / "run")))
+            request_scan = install_mock(adapter.introspection_role, "request_background_scan", MagicMock())
+
+            adapter.io_role._complete_service_discovery(["com.victronenergy.system"])
+            request_scan.assert_called_once_with()
+
+            adapter.io_role._complete_service_discovery(
+                ["com.victronenergy.system", "unrelated.service"]
+            )
+            request_scan.assert_called_once_with()
+
+            adapter.io_role._complete_service_discovery(
+                [
+                    "com.victronenergy.system",
+                    "unrelated.service",
+                    "com.victronenergy.pvinverter.http_48",
+                ]
+            )
+            self.assertEqual(request_scan.call_count, 2)
+
     def test_gateway_non_write_introspection_command_contracts(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "config.ini"

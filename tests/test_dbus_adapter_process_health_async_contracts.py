@@ -146,6 +146,9 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                     "circuit_marker": 41,
                     "operational_state": "degraded",
                     "performance_state": "protective",
+                    "resource_state": "resource-busy",
+                    "resource_evidence": None,
+                    "protective_cause": "recovery-hold",
                     "state_changed_at": 2000.0,
                     "state_recovery_pending": False,
                     "pending_command_count": 1,
@@ -228,6 +231,7 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                 slo_state="violated",
                 resource_state="resource-busy",
                 backpressure_state="slow",
+                resource_protective=False,
             )
             adapter.energy_discovery.dormant_evidence.assert_called_once_with()
             adapter.energy_discovery.source_unavailability_reasons.assert_called_once_with(
@@ -266,6 +270,7 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                 slo_state="violated",
                 resource_state="resource-busy",
                 backpressure_state="ok",
+                resource_protective=False,
             )
             self.assertEqual(missing_states.health["discovery_next_scan_in_s"], 0.0)
 
@@ -540,3 +545,47 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                 300.0,
                 service_heartbeat_fields=heartbeat_fields,
             )
+
+    def test_resource_protective_classification_uses_causal_evidence(self) -> None:
+        load_only = {"active": True, "causes": ["load"]}
+        cpu_pressure = {"active": True, "causes": ["cpu"]}
+        memory_pressure = {"active": True, "causes": ["memory"]}
+
+        self.assertFalse(
+            process_health_module._resource_pressure_is_protective(
+                "constrained",
+                load_only,
+            )
+        )
+        self.assertTrue(
+            process_health_module._resource_pressure_is_protective(
+                "constrained",
+                cpu_pressure,
+            )
+        )
+        self.assertTrue(
+            process_health_module._resource_pressure_is_protective(
+                "constrained",
+                memory_pressure,
+            )
+        )
+        self.assertEqual(
+            process_health_module._protective_cause(
+                aggregate_state="protective",
+                operational_state="ok",
+                backpressure_state="ok",
+                resource_protective=True,
+                resource_evidence=memory_pressure,
+            ),
+            "resource-memory",
+        )
+        self.assertEqual(
+            process_health_module._protective_cause(
+                aggregate_state="degraded",
+                operational_state="ok",
+                backpressure_state="ok",
+                resource_protective=False,
+                resource_evidence=load_only,
+            ),
+            "",
+        )

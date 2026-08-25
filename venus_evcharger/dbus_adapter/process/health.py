@@ -55,6 +55,15 @@ from venus_evcharger.dbus_adapter.health.state import (
     performance_health_state,
 )
 from venus_evcharger.dbus_adapter.process.protocols.health import DbusAdapterHealthContext
+from venus_evcharger.dbus_adapter.process.resource_health import (
+    protective_cause as _protective_cause,
+)
+from venus_evcharger.dbus_adapter.process.resource_health import (
+    resource_pressure_evidence as _resource_pressure_evidence,
+)
+from venus_evcharger.dbus_adapter.process.resource_health import (
+    resource_pressure_is_protective as _resource_pressure_is_protective,
+)
 from venus_evcharger.dbus_adapter.read.keys import CORE_ENERGY_READ_KEYS
 from venus_evcharger.dbus_gateway_core import float_or_zero
 from venus_evcharger.ipc.command_types import CommandPayload
@@ -105,10 +114,7 @@ class DbusAdapterHealth:
         context = self._context
         if not context.health_log_path or context.health_log_interval_seconds <= 0.0:
             return False
-        return bool(
-            time.monotonic() - context._last_health_log_monotonic
-            >= context.health_log_interval_seconds
-        )
+        return bool(time.monotonic() - context._last_health_log_monotonic >= context.health_log_interval_seconds)
 
     def health_snapshot(self) -> CommandPayload:
         return dict(self.control_snapshot().health)
@@ -156,9 +162,7 @@ class DbusAdapterHealth:
             monotonic_at=current_monotonic,
             keys=CORE_ENERGY_READ_KEYS,
         )
-        critical_queue_operations = (
-            critical_queue_operation_count(queue_classes) + len(core_pending)
-        )
+        critical_queue_operations = critical_queue_operation_count(queue_classes) + len(core_pending)
         operation_p95 = operation_p95_ms(circuit_health)
         circuit_state = str(circuit_health.get("state", "ok"))
         backpressure = backpressure_snapshot(
@@ -168,6 +172,11 @@ class DbusAdapterHealth:
             queue_max_age_seconds=context.slo_queue_max_age_seconds,
         )
         resource_state = str(resources.get("state", "ok"))
+        resource_evidence = _resource_pressure_evidence(resources)
+        resource_protective = _resource_pressure_is_protective(
+            resource_state,
+            resource_evidence,
+        )
         backpressure_state = str(backpressure.get("state", "ok"))
         pressure_state = runtime_pressure_state(
             resource_state,
@@ -178,6 +187,7 @@ class DbusAdapterHealth:
             slo_state=str(slo.get("state", "violated")),
             resource_state=resource_state,
             backpressure_state=backpressure_state,
+            resource_protective=resource_protective,
         )
         aggregate = self._state_latch.observe(
             operational_state,
@@ -185,24 +195,28 @@ class DbusAdapterHealth:
             monotonic_at=current_monotonic,
             captured_at=current_time,
         )
-        dormant_evidence = context.energy_discovery.dormant_evidence()
-        dormant_source_ids = frozenset(
-            evidence.source_id for evidence in dormant_evidence
+        protective_cause = _protective_cause(
+            aggregate_state=aggregate.state,
+            operational_state=operational_state,
+            backpressure_state=backpressure_state,
+            resource_protective=resource_protective,
+            resource_evidence=resource_evidence,
         )
-        source_unavailability_reasons = (
-            context.energy_discovery.source_unavailability_reasons(
-                dormant_source_ids=dormant_source_ids,
-            )
+        dormant_evidence = context.energy_discovery.dormant_evidence()
+        dormant_source_ids = frozenset(evidence.source_id for evidence in dormant_evidence)
+        source_unavailability_reasons = context.energy_discovery.source_unavailability_reasons(
+            dormant_source_ids=dormant_source_ids,
         )
         heartbeat_age = (
-            max(0.0, current_monotonic - context._last_tick_monotonic)
-            if context._last_tick_monotonic > 0.0
-            else 0.0
+            max(0.0, current_monotonic - context._last_tick_monotonic) if context._last_tick_monotonic > 0.0 else 0.0
         )
         health: CommandPayload = {
             **circuit_health,
             "operational_state": operational_state,
             "performance_state": performance_state,
+            "resource_state": resource_state,
+            "resource_evidence": resource_evidence,
+            "protective_cause": protective_cause,
             "state": aggregate.state,
             "state_changed_at": aggregate.changed_at,
             "state_recovery_pending": aggregate.recovery_pending,
@@ -219,18 +233,10 @@ class DbusAdapterHealth:
                 0.0,
                 context.discovery.next_scan_monotonic - current_monotonic,
             ),
-            "discovery_active_interval_s": (
-                context.discovery.active_interval_seconds
-            ),
-            "dormant_energy_source_ids": [
-                evidence.source_id for evidence in dormant_evidence
-            ],
-            "dormant_energy_source_evidence": [
-                evidence.to_payload() for evidence in dormant_evidence
-            ],
-            "energy_source_unavailability_reasons": (
-                source_unavailability_reasons
-            ),
+            "discovery_active_interval_s": (context.discovery.active_interval_seconds),
+            "dormant_energy_source_ids": [evidence.source_id for evidence in dormant_evidence],
+            "dormant_energy_source_evidence": [evidence.to_payload() for evidence in dormant_evidence],
+            "energy_source_unavailability_reasons": (source_unavailability_reasons),
             "mainloop_heartbeat_age_s": heartbeat_age,
             "queues": queue_metrics,
             "queue_classes": queue_classes,
@@ -240,9 +246,7 @@ class DbusAdapterHealth:
             "slo": slo,
             "backpressure": backpressure,
             "resources": resources,
-            "publication_freshness_deadline_s": effective_gui_max_age_seconds(
-                thresholds
-            ),
+            "publication_freshness_deadline_s": effective_gui_max_age_seconds(thresholds),
             "adaptive_tick_seconds": context.tick_seconds,
             "min_tick_seconds": context.min_tick_seconds,
             "max_tick_seconds": context.max_tick_seconds,
@@ -330,9 +334,7 @@ class DbusAdapterHealth:
         eventloop: Mapping[str, object] | None = None,
     ) -> dict[str, float]:
         eventloop_metrics = (
-            self._context.tick_health.snapshot(now=current_monotonic)
-            if eventloop is None
-            else eventloop
+            self._context.tick_health.snapshot(now=current_monotonic) if eventloop is None else eventloop
         )
         measurement_age = self.max_publication_field_age(
             GUI_MEASUREMENT_FRESHNESS_FIELDS,
@@ -378,18 +380,12 @@ class DbusAdapterHealth:
         return fields
 
     def gui_session_freshness_fields(self, monotonic_at: float) -> set[str]:
-        return (
-            set(ACTIVE_SESSION_GUI_FRESHNESS_FIELDS)
-            if self.charging_session_active_for_gui(monotonic_at)
-            else set()
-        )
+        return set(ACTIVE_SESSION_GUI_FRESHNESS_FIELDS) if self.charging_session_active_for_gui(monotonic_at) else set()
 
     def charging_session_active_for_gui(self, monotonic_at: float) -> bool:
         return (
-            self.fresh_evcs_field_float("ac_power_w", monotonic_at)
-            >= SESSION_ACTIVE_POWER_WATTS
-            or self.fresh_evcs_field_float("ac_current_a", monotonic_at)
-            >= SESSION_ACTIVE_CURRENT_AMPS
+            self.fresh_evcs_field_float("ac_power_w", monotonic_at) >= SESSION_ACTIVE_POWER_WATTS
+            or self.fresh_evcs_field_float("ac_current_a", monotonic_at) >= SESSION_ACTIVE_CURRENT_AMPS
         )
 
     def fresh_evcs_field_float(self, field: str, monotonic_at: float) -> float:
@@ -465,12 +461,14 @@ class DbusAdapterHealth:
         *,
         service_heartbeat_fields: set[str] | frozenset[str] = frozenset(),
     ) -> float:
-        return float(max_publication_field_age(
-            self._context.publication_registry,
-            fields,
-            monotonic_at,
-            service_heartbeat_fields=service_heartbeat_fields,
-        ))
+        return float(
+            max_publication_field_age(
+                self._context.publication_registry,
+                fields,
+                monotonic_at,
+                service_heartbeat_fields=service_heartbeat_fields,
+            )
+        )
 
     def missing_publication_field_count(
         self,
@@ -491,4 +489,3 @@ def _eventloop_metric(
 ) -> float:
     value = metrics.get(preferred) if preferred in metrics else metrics.get(legacy)
     return float(float_or_zero(value))
-

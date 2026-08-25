@@ -11,11 +11,15 @@ pub mod config;
 mod config_topology;
 pub mod error;
 pub mod gateway;
+pub(crate) mod gateway_discovery;
+pub(crate) mod gateway_evidence;
+pub mod gateway_health;
 pub(crate) mod gateway_sample;
 pub(crate) mod gateway_validation;
 pub mod ini;
 pub mod probe;
 pub mod runtime;
 pub mod snapshot;
+pub mod system_activity;
 
 pub use error::{ObserverError, Result};

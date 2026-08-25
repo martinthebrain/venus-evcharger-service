@@ -17,7 +17,6 @@ _STATE_RANK: dict[GatewayHealthState, int] = {
 _PROTECTIVE_PERFORMANCE_SIGNALS = frozenset(
     {
         ("backpressure", "protective"),
-        ("resource", "constrained"),
     }
 )
 _DEGRADED_PERFORMANCE_SIGNALS = frozenset(
@@ -25,6 +24,7 @@ _DEGRADED_PERFORMANCE_SIGNALS = frozenset(
         ("slo", "violated"),
         ("backpressure", "congested"),
         ("backpressure", "slow"),
+        ("resource", "constrained"),
     }
 )
 
@@ -124,6 +124,7 @@ def performance_health_state(
     slo_state: str,
     resource_state: str,
     backpressure_state: str,
+    resource_protective: bool = False,
 ) -> GatewayHealthState:
     """Derive a verdict from service impact, not managed resource pressure."""
     signals = {
@@ -131,7 +132,7 @@ def performance_health_state(
         ("resource", resource_state),
         ("backpressure", backpressure_state),
     }
-    if signals & _PROTECTIVE_PERFORMANCE_SIGNALS:
+    if resource_protective or signals & _PROTECTIVE_PERFORMANCE_SIGNALS:
         return "protective"
     if signals & _DEGRADED_PERFORMANCE_SIGNALS:
         return "degraded"

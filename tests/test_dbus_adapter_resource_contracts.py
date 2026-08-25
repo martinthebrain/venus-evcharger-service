@@ -91,6 +91,30 @@ class _ResourceReader:
 
 
 class TestResourceMonitorContracts(unittest.TestCase):
+    def test_snapshot_copy_isolates_resource_evidence_only_for_text_lists(self) -> None:
+        causes = ["cpu"]
+        payload = {
+            "process": {"pid": 7},
+            "pressure_evidence": {"causes": causes},
+        }
+
+        copied = resources_module._snapshot_copy(payload)
+
+        self.assertEqual(copied, payload)
+        self.assertIsNot(copied["process"], payload["process"])
+        copied_evidence = copied["pressure_evidence"]
+        assert isinstance(copied_evidence, dict)
+        self.assertIsNot(copied_evidence, payload["pressure_evidence"])
+        self.assertIsNot(copied_evidence["causes"], causes)
+
+        tuple_causes = ("cpu",)
+        tuple_copy = resources_module._snapshot_copy(
+            {"pressure_evidence": {"causes": tuple_causes}}
+        )
+        tuple_evidence = tuple_copy["pressure_evidence"]
+        assert isinstance(tuple_evidence, dict)
+        self.assertIs(tuple_evidence["causes"], tuple_causes)
+
     def test_snapshot_copy_preserves_non_mapping_process_metadata(self) -> None:
         payload = {"state": "unknown", "process": "unavailable"}
 
@@ -178,6 +202,7 @@ class TestResourceMonitorContracts(unittest.TestCase):
                 "mem_available_pct": 50.0,
                 "memory_sample_status": "fresh",
                 "memory_sample_age_s": 0.0,
+                "pressure_evidence": None,
                 "process": {
                     "pid": 123,
                     "rss_kb": 10.0,
@@ -238,6 +263,54 @@ class TestResourceMonitorContracts(unittest.TestCase):
 
         self.assertEqual(monitor.snapshot()["state"], "constrained")
         self.assertEqual(monitor.snapshot()["state"], "constrained")
+
+    def test_monitor_retains_exact_constrained_trigger_evidence(self) -> None:
+        reader = _ResourceReader(
+            system_cpu=iter([(100, 50), (200, 100), (300, 150)]),
+            process_cpu=iter([1.0, 2.0, 3.0]),
+            load_average=(6.0, 3.0, 1.0),
+            cpu_count=4,
+        )
+        monitor = ResourceMonitor(
+            pid=123,
+            settings=_settings(recovery_hold_seconds=0.0),
+            reader=reader,
+            monotonic=iter([1.0, 2.0, 3.0]).__next__,
+            wall_clock=iter([100.0, 101.0, 102.0]).__next__,
+        )
+
+        active = monitor.snapshot()
+        evidence = active["pressure_evidence"]
+        self.assertEqual(
+            evidence,
+            {
+                "active": True,
+                "triggered_at": 100.0,
+                "causes": ["load"],
+                "load_per_cpu_1m": 1.5,
+                "system_cpu_pct": 0.0,
+                "mem_available_kb": 100000.0,
+            },
+        )
+        assert isinstance(evidence, dict)
+        causes = evidence["causes"]
+        assert isinstance(causes, list)
+        causes.append("cpu")
+
+        monitor._reader._load_average = (0.0, 0.0, 0.0)
+        recovered = monitor.snapshot()
+        self.assertEqual(recovered["state"], "ok")
+        self.assertEqual(
+            recovered["pressure_evidence"],
+            {
+                "active": False,
+                "triggered_at": 100.0,
+                "causes": ["load"],
+                "load_per_cpu_1m": 1.5,
+                "system_cpu_pct": 0.0,
+                "mem_available_kb": 100000.0,
+            },
+        )
 
     def test_monitor_forwards_load_and_cpu_pressure_dimensions(self) -> None:
         load_monitor = ResourceMonitor(

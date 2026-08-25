@@ -59,6 +59,42 @@ class _Clock:
 
 
 class DbusAdapterDiscoveryMutationContracts(unittest.TestCase):
+    def test_introspection_signature_tracks_only_relevant_target_topology(self) -> None:
+        manager = DbusEnergyDiscoveryManager(_specs())
+        initial = (
+            (GRID_SERVICE, "/Ac/Grid/L1/Power", False),
+            (GRID_SERVICE, "/Ac/Grid/L2/Power", False),
+        )
+        self.assertEqual(manager.introspection_topology_signature(), initial)
+
+        manager.update_services(["unrelated.service"], captured_at=1.0)
+        self.assertEqual(manager.introspection_topology_signature(), initial)
+
+        manager.update_services([GRID_SERVICE], captured_at=2.0)
+        self.assertEqual(
+            manager.introspection_topology_signature(),
+            (
+                (GRID_SERVICE, "/Ac/Grid/L1/Power", True),
+                (GRID_SERVICE, "/Ac/Grid/L2/Power", True),
+                (GRID_SERVICE, "/Dc/Pv/Power", True),
+            ),
+        )
+
+        manager.update_services(
+            [AC_PV_A, BATTERY_A, GRID_SERVICE],
+            captured_at=3.0,
+        )
+        self.assertEqual(
+            manager.introspection_topology_signature(),
+            (
+                (BATTERY_A, "/Soc", True),
+                (AC_PV_A, "/Ac/Power", True),
+                (GRID_SERVICE, "/Ac/Grid/L1/Power", True),
+                (GRID_SERVICE, "/Ac/Grid/L2/Power", True),
+                (GRID_SERVICE, "/Dc/Pv/Power", True),
+            ),
+        )
+
     def test_default_limit_and_explicit_service_precedence_are_exact(self) -> None:
         manager = DbusEnergyDiscoveryManager({})
         names = [f"source.{index:02d}" for index in range(12, -1, -1)]
