@@ -59,6 +59,14 @@ def adaptive_tick_seconds(
     if demand.operation_count == 0:
         return baseline
 
+    service_floor = _service_time_floor(
+        minimum,
+        maximum,
+        demand,
+        resource_state=resource_state,
+    )
+    baseline = max(baseline, service_floor)
+
     deadline = _critical_deadline(policy, demand)
     operation_seconds = max(0.0, float(demand.operation_p95_ms)) / 1000.0
     available_seconds = max(
@@ -67,7 +75,21 @@ def adaptive_tick_seconds(
         - operation_seconds * demand.operation_count,
     )
     deadline_tick = available_seconds / demand.operation_count
-    return min(baseline, _clamp(deadline_tick, minimum, maximum))
+    return min(baseline, _clamp(deadline_tick, service_floor, maximum))
+
+
+def _service_time_floor(
+    minimum: float,
+    maximum: float,
+    demand: TickDemand,
+    *,
+    resource_state: str,
+) -> float:
+    """Avoid polling faster than DBus can complete read-only work under pressure."""
+    if resource_state == "ok" or demand.critical_queue_operations > 0:
+        return minimum
+    operation_seconds = max(0.0, float(demand.operation_p95_ms)) / 1000.0
+    return _clamp(operation_seconds, minimum, maximum)
 
 
 def _state_baseline(

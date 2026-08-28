@@ -21,6 +21,19 @@ def pv_total_members(
     ]
 
 
+def configured_pv_aggregate_members(spec: ReadSpec) -> list[tuple[str, str]]:
+    """Return an explicitly configured semantic AC-PV aggregate, if present."""
+    service = _stripped_text(spec.get("aggregate_service"))
+    paths = spec.get("aggregate_paths", [])
+    if not service or not isinstance(paths, list):
+        return []
+    return [
+        (service, path)
+        for raw_path in paths
+        if (path := _stripped_text(raw_path)).startswith("/")
+    ]
+
+
 def ac_pv_members(
     spec: ReadSpec,
     services: Sequence[str],

@@ -133,6 +133,23 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
                 10.0 + adapter.tick_seconds,
             )
 
+    def test_one_shot_timer_rearms_at_the_actual_work_deadline(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = self._adapter(temp_dir)
+            adapter._next_work_tick_monotonic = 12.0
+            install_mock(adapter.loop_role, "tick", MagicMock(return_value=True))
+            with (
+                patch.object(process_loop_module.time, "monotonic", return_value=10.0),
+                patch.object(process_loop_module.GLib, "timeout_add", return_value=123) as timeout_add,
+            ):
+                self.assertIs(adapter.loop_role._timer_tick(), False)
+            timeout_add.assert_called_once_with(2000, adapter.loop_role._timer_tick)
+
+            adapter.loop_role.tick.return_value = False
+            timeout_add.reset_mock()
+            self.assertIs(adapter.loop_role._timer_tick(), False)
+            timeout_add.assert_not_called()
+
     def test_tick_return_contract_distinguishes_stop_wait_and_stop_during_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             stopped = self._adapter(temp_dir, "stopped")

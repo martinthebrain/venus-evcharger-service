@@ -71,6 +71,7 @@ from venus_evcharger.ipc.command_types import CommandPayload
 SESSION_ACTIVE_POWER_WATTS = 50.0
 SESSION_ACTIVE_CURRENT_AMPS = 0.2
 MIN_PUBLICATION_SCHEDULER_TOLERANCE_SECONDS = 0.05
+MAX_TICK_CONTROL_SNAPSHOT_AGE_SECONDS = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +97,8 @@ class DbusAdapterHealth:
     def __init__(self, context: DbusAdapterHealthContext) -> None:
         self._context = context
         self._state_latch = GatewayHealthStateLatch()
+        self._tick_control_snapshot: GatewayControlSnapshot | None = None
+        self._last_regulated_snapshot: GatewayControlSnapshot | None = None
 
     def append_health_log(self, health: Mapping[str, object]) -> None:
         if not self.health_log_due():
@@ -118,6 +121,28 @@ class DbusAdapterHealth:
 
     def health_snapshot(self) -> CommandPayload:
         return dict(self.control_snapshot().health)
+
+    def control_snapshot_for_tick(self) -> GatewayControlSnapshot:
+        """Reuse expensive diagnostic projections within one bounded interval.
+
+        Scheduler decisions tolerate the same cadence as the public health
+        heartbeat. Direct health requests still call :meth:`control_snapshot`
+        and therefore always receive a newly evaluated snapshot.
+        """
+        cached = self._tick_control_snapshot
+        if cached is None:
+            return self.control_snapshot()
+        current = time.monotonic()
+        maximum_age = min(
+            MAX_TICK_CONTROL_SNAPSHOT_AGE_SECONDS,
+            max(
+                self._context.min_tick_seconds,
+                self._context.health_publish_interval_seconds,
+            ),
+        )
+        if current - cached.monotonic_at < maximum_age:
+            return cached
+        return self.control_snapshot()
 
     def control_snapshot(self) -> GatewayControlSnapshot:
         context = self._context
@@ -262,7 +287,7 @@ class DbusAdapterHealth:
                 **eventloop,
             },
         }
-        return GatewayControlSnapshot(
+        snapshot = GatewayControlSnapshot(
             captured_at=current_time,
             monotonic_at=current_monotonic,
             health=health,
@@ -285,6 +310,8 @@ class DbusAdapterHealth:
             critical_queue_operations=critical_queue_operations,
             operation_p95_ms=operation_p95,
         )
+        self._tick_control_snapshot = snapshot
+        return snapshot
 
     def cache_freshness_snapshot(self, now: float) -> CommandPayload:
         return cache_freshness(self._context.cache, now)
@@ -403,6 +430,9 @@ class DbusAdapterHealth:
     ) -> GatewayControlSnapshot:
         context = self._context
         control = self.control_snapshot() if snapshot is None else snapshot
+        if control is self._last_regulated_snapshot:
+            return control
+        self._last_regulated_snapshot = control
         thresholds = self.slo_thresholds()
         context.write_scheduler.set_dynamic_local_publish_burst(
             regulated_publish_burst(

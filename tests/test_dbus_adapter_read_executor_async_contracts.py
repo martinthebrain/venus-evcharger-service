@@ -227,6 +227,41 @@ class DbusReadExecutorAsyncContractTests(unittest.TestCase):
         self.assertEqual(state.index, 1)
         completion.assert_called_once_with("deferred")
 
+    def test_official_pv_aggregate_replaces_member_fanout_but_keeps_dc_input(self) -> None:
+        executor, _adapter = self._executor()
+        completion = MagicMock()
+        with patch.object(
+            executor,
+            "_poll_aggregate_step",
+            MagicMock(return_value="deferred"),
+        ) as poll:
+            self.assertEqual(
+                executor._poll_pv_total_step(
+                    "pv_power_w",
+                    {
+                        "aggregate": "pv-total",
+                        "aggregate_service": "com.victronenergy.system",
+                        "aggregate_paths": ["/Ac/PvOnGrid/Total/Power"],
+                        "dc_service": "com.victronenergy.system",
+                        "dc_path": "/Dc/Pv/Power",
+                        "use_dc_pv": True,
+                    },
+                    completion,
+                ),
+                "deferred",
+            )
+
+        plan = poll.call_args.args[0]
+        self.assertEqual(
+            plan.members,
+            (
+                ("com.victronenergy.system", "/Ac/PvOnGrid/Total/Power"),
+                ("com.victronenergy.system", "/Dc/Pv/Power"),
+            ),
+        )
+        self.assertFalse(plan.record_discovery_values)
+        self.assertIs(plan.completion, completion)
+
     def test_aggregate_error_paths_preserve_member_and_key_identity(self) -> None:
         executor, _adapter = self._executor()
         error = RuntimeError("offline")

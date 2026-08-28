@@ -146,13 +146,27 @@ class PvAggregateContinuity:
         self,
         key: str,
         spec: ReadSpec,
+        *,
+        explicit_members: Iterable[PvMember] | None = None,
     ) -> tuple[tuple[PvMember, ...], AggregateState | None]:
         """Return probe members or a completed hold-only aggregate state."""
-        candidates = tuple(self._adapter.energy_discovery.pv_candidates(spec))
+        candidates = tuple(
+            self._adapter.energy_discovery.pv_candidates(spec)
+            if explicit_members is None
+            else _normalized_members(explicit_members)
+        )
         self._window.retain_members(candidates)
         self._candidates_by_key[key] = candidates
         in_progress = self._aggregates.signature_members(key, PV_TOTAL_AGGREGATE)
-        members = tuple(in_progress if in_progress is not None else self._adapter.energy_discovery.pv_members(spec))
+        members = tuple(
+            in_progress
+            if in_progress is not None
+            else (
+                self._adapter.energy_discovery.pv_members(spec)
+                if explicit_members is None
+                else candidates
+            )
+        )
         if members:
             return members, None
         state = self._aggregates.state_for(

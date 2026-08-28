@@ -17,7 +17,11 @@ from venus_evcharger.dbus_adapter.read.aggregate import (
     AggregateStore,
 )
 from venus_evcharger.dbus_adapter.read.protocols import DbusReadAdapter
-from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS
+from venus_evcharger.dbus_adapter.read.pv import (
+    PV_MEMBER_ERROR_BACKOFF_SECONDS,
+    configured_pv_aggregate_members,
+    dc_pv_members,
+)
 from venus_evcharger.dbus_adapter.read.pv_last_good import PvAggregateContinuity
 from venus_evcharger.dbus_adapter.read.spec import (
     ReadSpec,
@@ -225,7 +229,17 @@ class DbusReadExecutor:
         spec: ReadSpec,
         completion: ReadCompletion,
     ) -> CommandOutcome:
-        members, held_state = self._pv_continuity.plan(key, spec)
+        configured_members = configured_pv_aggregate_members(spec)
+        explicit_members = (
+            [*configured_members, *dc_pv_members(spec)]
+            if configured_members
+            else None
+        )
+        members, held_state = self._pv_continuity.plan(
+            key,
+            spec,
+            explicit_members=explicit_members,
+        )
         if held_state is not None:
             self._complete_aggregate(key, held_state)
             return "applied"
@@ -239,6 +253,7 @@ class DbusReadExecutor:
                 completion=completion,
                 ignore_member_errors=True,
                 empty_confidence=read_spec_optional_confidence(spec),
+                record_discovery_values=not configured_members,
             )
         )
 
@@ -295,6 +310,7 @@ class DbusReadExecutor:
             member_count=len(plan.members),
             ignore_member_errors=plan.ignore_member_errors,
             completion=plan.completion,
+            record_discovery_values=plan.record_discovery_values,
         )
         self._submit_busitem(
             service,
@@ -333,11 +349,12 @@ class DbusReadExecutor:
             continuation.path,
             value,
         )
-        self.adapter.energy_discovery.record_pv_value(
-            continuation.service,
-            continuation.path,
-            value,
-        )
+        if continuation.record_discovery_values:
+            self.adapter.energy_discovery.record_pv_value(
+                continuation.service,
+                continuation.path,
+                value,
+            )
         target = read_target(continuation.service, continuation.path)
         if target is not None:
             self.adapter.cache.update_external_read(
@@ -382,12 +399,21 @@ class DbusReadExecutor:
             )
             continuation.completion("dropped")
             return
-        self._record_optional_aggregate_error(
-            continuation.service,
-            continuation.path,
-            continuation.state,
-            error,
-        )
+        if continuation.record_discovery_values:
+            self._record_optional_aggregate_error(
+                continuation.service,
+                continuation.path,
+                continuation.state,
+                error,
+            )
+        else:
+            self._record_optional_aggregate_error(
+                continuation.service,
+                continuation.path,
+                continuation.state,
+                error,
+                record_discovery_value=False,
+            )
         self._record_optional_interval_factor(
             continuation.key,
             continuation.service,
@@ -414,13 +440,16 @@ class DbusReadExecutor:
         path: str,
         state: AggregateState,
         error: BaseException,
+        *,
+        record_discovery_value: bool = True,
     ) -> None:
         self._pv_continuity.record_error(state, service, path, error)
-        self.adapter.energy_discovery.record_pv_error(
-            service,
-            path,
-            error,
-        )
+        if record_discovery_value:
+            self.adapter.energy_discovery.record_pv_error(
+                service,
+                path,
+                error,
+            )
         target = read_target(service, path)
         if target is not None:
             self.adapter.cache.mark_unavailable(

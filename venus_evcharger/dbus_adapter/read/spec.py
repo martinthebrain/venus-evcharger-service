@@ -11,6 +11,8 @@ class ReadSpec(TypedDict, total=False):
     """Configuration for one scheduled DBus read group."""
 
     aggregate: str
+    aggregate_paths: list[str]
+    aggregate_service: str
     dc_path: str
     dc_service: str
     interval: float
@@ -97,8 +99,8 @@ def _copy_non_text_field(spec: ReadSpec, key: str, value: object) -> None:
     if key in _BOOL_FIELDS:
         _copy_bool_field(spec, key, value)
         return
-    if key == "paths":
-        _copy_paths_field(spec, value)
+    if key in {"paths", "aggregate_paths"}:
+        _copy_paths_field(spec, key, value)
         return
     raise KeyError(f"unknown read spec field: {key}")
 
@@ -120,6 +122,8 @@ def _copy_source_text_field(spec: ReadSpec, key: str, value: str) -> None:
         spec["service"] = value
     elif key == "prefix":
         spec["prefix"] = value
+    elif key == "aggregate_service":
+        spec["aggregate_service"] = value
     else:
         spec["priority"] = value
 
@@ -154,13 +158,16 @@ def _copy_bool_field(spec: ReadSpec, key: str, value: object) -> None:
         spec["use_dc_pv"] = value
 
 
-def _copy_paths_field(spec: ReadSpec, value: object) -> None:
+def _copy_paths_field(spec: ReadSpec, key: str, value: object) -> None:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise TypeError(f"read spec field paths must be list[str], got {type(value).__name__}")
-    spec["paths"] = list(value)
+        raise TypeError(f"read spec field {key} must be list[str], got {type(value).__name__}")
+    if key == "aggregate_paths":
+        spec["aggregate_paths"] = list(value)
+    else:
+        spec["paths"] = list(value)
 
 
-_SOURCE_TEXT_FIELDS = frozenset({"service", "prefix", "priority"})
+_SOURCE_TEXT_FIELDS = frozenset({"service", "prefix", "priority", "aggregate_service"})
 _PATH_TEXT_FIELDS = frozenset({"path", "dc_path", "dc_service"})
 _TEXT_FIELDS = frozenset({"aggregate", *_SOURCE_TEXT_FIELDS, *_PATH_TEXT_FIELDS})
 _FLOAT_FIELDS = frozenset({"interval", "optional_confidence", "stale_after_seconds"})

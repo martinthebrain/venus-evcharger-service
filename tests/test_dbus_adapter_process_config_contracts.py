@@ -80,13 +80,13 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                     "prefix": "com.victronenergy.battery",
                     "path": "/Dc/Battery/Soc",
                     "aggregate": "first-service",
-                    "interval": 2.0,
+                    "interval": 4.0,
                     "priority": "read",
                 },
                 "battery_net_power_w": {
                     "service": "com.victronenergy.system",
                     "path": "/Dc/Battery/Power",
-                    "interval": 2.0,
+                    "interval": 10.0,
                     "priority": "read",
                 },
                 "battery_capacity_ah": {
@@ -158,7 +158,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "prefix": "battery.prefix",
                 "path": "/Soc",
                 "aggregate": "",
-                "interval": 2.0,
+                "interval": 4.0,
                 "priority": "read",
             },
         )
@@ -167,7 +167,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
             {
                 "service": "system.service",
                 "path": "/Battery/Power",
-                "interval": 2.0,
+                "interval": 10.0,
                 "priority": "read",
             },
         )
@@ -188,6 +188,35 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                         "priority": "read",
                     },
                 )
+
+    def test_gateway_read_cadences_and_official_pv_aggregate_are_configurable(self) -> None:
+        specs = config.configured_read_specs(
+            defaults(
+                {
+                    "DbusGatewayGridReadIntervalSeconds": "1.5",
+                    "DbusGatewayPvReadIntervalSeconds": "1.75",
+                    "DbusGatewayBatterySocReadIntervalSeconds": "6",
+                    "DbusGatewayBatteryPowerReadIntervalSeconds": "12",
+                    "DbusGatewayPvAggregateService": " com.victronenergy.system ",
+                    "DbusGatewayPvAggregatePaths": (
+                        " /Ac/PvOnGrid/Total/Power, invalid,"
+                        "/Ac/PvOnOutput/Total/Power "
+                    ),
+                }
+            )
+        )
+        self.assertEqual(specs["grid_power_w"]["interval"], 1.5)
+        self.assertEqual(specs["pv_power_w"]["interval"], 1.75)
+        self.assertEqual(specs["battery_soc"]["interval"], 6.0)
+        self.assertEqual(specs["battery_net_power_w"]["interval"], 12.0)
+        self.assertEqual(
+            specs["pv_power_w"]["aggregate_service"],
+            "com.victronenergy.system",
+        )
+        self.assertEqual(
+            specs["pv_power_w"]["aggregate_paths"],
+            ["/Ac/PvOnGrid/Total/Power", "/Ac/PvOnOutput/Total/Power"],
+        )
 
     def test_rate_timing_and_slo_defaults_and_clamps(self) -> None:
         self.assertEqual(config.rate_settings(defaults()), config.GatewayRateSettings(0.25, 0.35, 2.0))

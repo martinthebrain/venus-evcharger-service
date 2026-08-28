@@ -44,13 +44,31 @@ class DbusAdapterLoop:
         context.socket_role.install_glib_watch()
         main_loop = GLib.MainLoop()
         context._main_loop = main_loop
-        GLib.timeout_add(max(50, int(context.min_tick_seconds * 1000)), self.tick)
+        self._schedule_timer(context.min_tick_seconds)
         try:
             main_loop.run()
         finally:
             context._stop = True
             context.operation_broker.cancel_current("gateway shutdown")
             context.socket_role.close_socket()
+
+    def _schedule_timer(self, delay_seconds: float | None = None) -> None:
+        """Arm one GLib timer for the next actual gateway work deadline."""
+        delay = self._next_timer_delay() if delay_seconds is None else max(0.0, float(delay_seconds))
+        GLib.timeout_add(max(50, int(delay * 1000)), self._timer_tick)
+
+    def _next_timer_delay(self) -> float:
+        deadline = self._context._next_work_tick_monotonic
+        if deadline <= 0.0:
+            return self._context.min_tick_seconds
+        return max(0.0, deadline - time.monotonic())
+
+    def _timer_tick(self) -> bool:
+        """Run one work callback and re-arm it only when work continues."""
+        keep_running = self.tick()
+        if keep_running:
+            self._schedule_timer()
+        return False
 
     def tick(self) -> bool:
         context = self._context
@@ -87,7 +105,7 @@ class DbusAdapterLoop:
             return
         try:
             self.process_one_dbus_operation_once()
-            control = context.health_role.control_snapshot()
+            control = context.health_role.control_snapshot_for_tick()
             self.update_adaptive_tick(control)
             context.io_role.publish_cache(control)
         except GATEWAY_TICK_RECOVERY_ERRORS as error:
