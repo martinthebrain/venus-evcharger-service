@@ -145,6 +145,7 @@ write_managed_layout() {
 	chmod 755 "${destination_root}/deploy/venus/service_venus_evcharger_observer/log/run" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/bin/venus-evcharger-forensic-observer" 2>/dev/null || true
 	chmod 755 "${destination_root}/deploy/venus/bin/venus-evcharger-auto-input-helper" 2>/dev/null || true
+	chmod 755 "${destination_root}/deploy/venus/bin/venus-evcharger-dbus-adapter" 2>/dev/null || true
 }
 
 promote_target_layout() {
@@ -260,6 +261,7 @@ deployment_sentinel_paths() {
 		venus_evcharger/core/contracts_bootstrap.py \
 		deploy/venus/bin/venus-evcharger-forensic-observer \
 		deploy/venus/bin/venus-evcharger-auto-input-helper \
+		deploy/venus/bin/venus-evcharger-dbus-adapter \
 		deploy/venus/service_venus_evcharger/run \
 		deploy/venus/service_venus_evcharger/log/run \
 		deploy/venus/service_venus_evcharger_dbus_adapter/run \

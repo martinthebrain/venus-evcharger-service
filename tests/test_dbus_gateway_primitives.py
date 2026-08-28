@@ -1001,7 +1001,7 @@ class DbusGatewayPrimitiveTests(unittest.TestCase):
         self.assertEqual(dbus_gateway_commands._command_kind_rank(evcs_live), 1)
         self.assertEqual(dbus_gateway_commands._command_kind_rank(companion_live), 1)
         self.assertEqual(dbus_gateway_commands._command_kind_rank(refresh), 2)
-        self.assertEqual(dbus_gateway_commands._command_kind({"type": ENERGY_REFRESH_COMMAND_KIND}), ENERGY_REFRESH_COMMAND_KIND)
+        self.assertEqual(dbus_gateway_commands._command_kind({"type": ENERGY_REFRESH_COMMAND_KIND}), "")
         self.assertEqual(dbus_gateway_commands._command_kind({}), "")
 
     def test_gateway_client_transport_and_semantic_command_helpers(self) -> None:

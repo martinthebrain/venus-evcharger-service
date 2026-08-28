@@ -31,6 +31,7 @@ mapfile -t SHELL_FILES < <(find . \
 	-path "./.venv-ruff" -prune -o \
 	-path "./rust/forensic-observer/target" -prune -o \
 	-path "./rust/auto-input-helper/target" -prune -o \
+	-path "./rust/dbus-adapter/target" -prune -o \
 	-type f \( -name "*.sh" -o -name "install.sh" \) \
 	-print | sort)
 

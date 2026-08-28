@@ -43,6 +43,7 @@ class _BootstrapInstallScriptsBundleCases(_BootstrapInstallScriptsBase):
                 "./venus_evcharger_dbus_adapter.py",
                 "./venus_evchargerctl.py",
                 "./deploy/venus/bin/venus-evcharger-auto-input-helper",
+                "./deploy/venus/bin/venus-evcharger-dbus-adapter",
                 "./deploy/venus/bin/venus-evcharger-forensic-observer",
                 "./deploy/venus/service_venus_evcharger/run",
                 "./deploy/venus/service_venus_evcharger_dbus_adapter/run",

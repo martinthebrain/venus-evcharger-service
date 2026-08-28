@@ -128,8 +128,8 @@ class GatewayWriteCommandDispatchCases(GatewayAdapterContractCase):
                 completion=unittest.mock.ANY,
             )
 
-    def test_command_kind_accepts_type_fallback_and_rejects_missing_identity(self) -> None:
-        self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "fallback")
+    def test_command_kind_rejects_type_alias_and_missing_identity(self) -> None:
+        self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "")
         self.assertEqual(write_support_module.command_kind({}), "")
 
     def test_circuit_breaker_blocks_before_semantic_dispatch(self) -> None:

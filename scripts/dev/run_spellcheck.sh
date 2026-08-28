@@ -18,4 +18,4 @@ fi
 
 "${CODESPELL[@]}" \
 	--ignore-words-list "astroid,eto,thur" \
-	--skip "./.git,./.venv-ruff,./__pycache__,./.mypy_cache,./build,./rust/forensic-observer/target,./rust/auto-input-helper/target,./.coverage,./coverage.xml"
+	--skip "./.git,./.venv-ruff,./__pycache__,./.mypy_cache,./build,./rust/forensic-observer/target,./rust/auto-input-helper/target,./rust/dbus-adapter/target,./.coverage,./coverage.xml"

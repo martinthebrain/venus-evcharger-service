@@ -87,6 +87,7 @@ venus_managed_service_pids() {
 		case "$command_line" in
 		"$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer "* | \
 			"$REPO_DIR/deploy/venus/bin/venus-evcharger-auto-input-helper "* | \
+			"$REPO_DIR/deploy/venus/bin/venus-evcharger-dbus-adapter "* | \
 			"python3 $REPO_DIR/venus_evcharger_observer.py "* | \
 			"/usr/bin/python3 $REPO_DIR/venus_evcharger_observer.py "*)
 			basename "$process_dir"

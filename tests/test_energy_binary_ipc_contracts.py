@@ -26,6 +26,14 @@ from venus_evcharger.ipc.energy import (
 )
 from venus_evcharger.ipc.energy_types import EnergyValueStatus
 
+_RUST_ENERGY_FIXTURE = (
+    Path(__file__).parents[1]
+    / "rust"
+    / "dbus-adapter"
+    / "contracts"
+    / "energy_fixture.v4.hex"
+)
+
 
 def _measurement(
     value: float | None,
@@ -62,6 +70,31 @@ def _snapshot() -> EnergyInputsSnapshot:
 
 
 class EnergyBinaryIpcContractTests(unittest.TestCase):
+    def test_rust_golden_fixture_decodes_to_the_shared_semantic_contract(self) -> None:
+        snapshot = binary.decode_energy_inputs(
+            bytes.fromhex(_RUST_ENERGY_FIXTURE.read_text(encoding="ascii"))
+        )
+
+        self.assertEqual(snapshot.sequence, 7)
+        self.assertEqual(snapshot.topology_generation, 2)
+        self.assertEqual(snapshot.captured_at, 1000.0)
+        self.assertEqual(snapshot.captured_monotonic, 500.0)
+        self.assertEqual(snapshot.grid_power_w.value, 10.0)
+        self.assertEqual(snapshot.grid_power_w.source_ids, ("grid-primary",))
+        self.assertEqual(snapshot.pv_power_w.value, 20.0)
+        self.assertEqual(snapshot.pv_power_w.source_ids, ("pv-ac-source",))
+        self.assertEqual(snapshot.battery_soc.value, 30.0)
+        self.assertEqual(snapshot.battery_net_power_w.value, -40.0)
+        self.assertEqual(snapshot.battery_net_power_w.status, "fresh")
+        for measurement in (
+            snapshot.battery_capacity_wh,
+            snapshot.battery_capacity_ah,
+            snapshot.battery_voltage_v,
+        ):
+            self.assertIsNone(measurement.value)
+            self.assertEqual(measurement.status, "unknown")
+            self.assertEqual(measurement.reason_code, "not-observed")
+
     def test_monotonic_freshness_reference_accepts_zero_only_at_the_boundary(self) -> None:
         self.assertTrue(binary._valid_current_monotonic(0.0))
         self.assertTrue(binary._valid_current_monotonic(0.5))

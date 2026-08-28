@@ -52,6 +52,12 @@ jobs:
           bash rust/forensic-observer/scripts/build-armv7.sh
           cmp /tmp/observer.before deploy/venus/bin/venus-evcharger-forensic-observer
 
+      - name: Verify pinned ARMv7 DBus adapter artifact
+        run: |
+          cp deploy/venus/bin/venus-evcharger-dbus-adapter /tmp/dbus-adapter.before
+          bash rust/dbus-adapter/scripts/build-armv7.sh
+          cmp /tmp/dbus-adapter.before deploy/venus/bin/venus-evcharger-dbus-adapter
+
       - name: Run optional audits
         run: make audit
 
