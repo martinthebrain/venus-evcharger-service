@@ -211,7 +211,7 @@ def _command_kind_rank(command: CommandMapping) -> int:
 
 
 def _command_kind(command: CommandMapping) -> str:
-    return _command_text(command, "kind") or _command_text(command, "type")
+    return _command_text(command, "kind")
 
 
 def _is_transient_publication(command: CommandMapping) -> bool:

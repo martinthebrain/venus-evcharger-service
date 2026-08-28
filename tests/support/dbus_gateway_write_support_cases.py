@@ -33,7 +33,7 @@ class GatewayWriteSupportCases(GatewayAdapterContractCase):
             self.assertEqual(write_support_module.priority_rank(priority), rank)
         self.assertEqual(deadline_pair({"deadline_s": "2.5", "created_at": "4"}), (2.5, 4.0))
         self.assertEqual(write_support_module.command_kind({"kind": "semantic", "type": "fallback"}), "semantic")
-        self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "fallback")
+        self.assertEqual(write_support_module.command_kind({"type": "fallback"}), "")
         self.assertEqual(write_support_module.command_kind({}), "")
 
     def test_only_semantic_field_publications_are_local_burst_commands(self) -> None:

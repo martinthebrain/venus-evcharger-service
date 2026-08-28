@@ -80,7 +80,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                     "prefix": "com.victronenergy.battery",
                     "path": "/Dc/Battery/Soc",
                     "aggregate": "first-service",
-                    "interval": 4.0,
+                    "interval": 3.0,
                     "priority": "read",
                 },
                 "battery_net_power_w": {
@@ -158,7 +158,7 @@ class DbusAdapterProcessConfigContractTests(unittest.TestCase):
                 "prefix": "battery.prefix",
                 "path": "/Soc",
                 "aggregate": "",
-                "interval": 4.0,
+                "interval": 3.0,
                 "priority": "read",
             },
         )

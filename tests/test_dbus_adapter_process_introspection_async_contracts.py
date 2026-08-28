@@ -249,7 +249,7 @@ class DbusAdapterProcessIntrospectionAsyncContractTests(GatewayAdapterContractCa
             self.assertFalse(adapter.introspection_role.background_introspection_due(21599.999))
             self.assertTrue(adapter.introspection_role.background_introspection_due(21600.0))
 
-    def test_non_write_dispatch_honors_kind_type_fallback_and_callback_identity(self) -> None:
+    def test_non_write_dispatch_requires_kind_and_preserves_callback_identity(self) -> None:
         with self.adapter_scenario() as scenario:
             role = scenario.adapter.introspection_role
             completion = MagicMock()
@@ -260,7 +260,7 @@ class DbusAdapterProcessIntrospectionAsyncContractTests(GatewayAdapterContractCa
                 MagicMock(return_value=CommandExecution.pending()),
             )
             refresh_command = {"kind": "refresh_energy_inputs", "request_id": "refresh"}
-            introspection_command = {"kind": "", "type": "introspect", "service": "svc"}
+            introspection_command = {"kind": "introspect", "service": "svc"}
 
             self.assertEqual(
                 role.schedule_non_write_command(refresh_command, "refresh.json", completion),
@@ -288,6 +288,14 @@ class DbusAdapterProcessIntrospectionAsyncContractTests(GatewayAdapterContractCa
             )
             self.assertEqual(
                 role.schedule_non_write_command({}, "empty.json", completion),
+                CommandExecution.immediate("dropped"),
+            )
+            self.assertEqual(
+                role.schedule_non_write_command(
+                    {"type": "introspect", "service": "svc"},
+                    "type-only.json",
+                    completion,
+                ),
                 CommandExecution.immediate("dropped"),
             )
             completion.assert_not_called()

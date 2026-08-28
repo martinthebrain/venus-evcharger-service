@@ -83,7 +83,7 @@ def _allowed_when_protective(priority: str, queue_class: str) -> bool:
 
 
 def _command_kind(command: CommandMapping) -> str:
-    return _command_text(command, "kind") or _command_text(command, "type")
+    return _command_text(command, "kind")
 
 
 def _is_publish_command(kind: str) -> bool:

@@ -18,13 +18,13 @@ from venus_evcharger.ipc.gateway_publication import (
 
 
 class DbusGatewayPolicyMutationContracts(unittest.TestCase):
-    def test_kind_uses_nonempty_kind_before_legacy_type(self) -> None:
+    def test_kind_is_required_and_type_is_not_a_command_alias(self) -> None:
         cases: list[tuple[dict[str, object], str]] = [
             ({"kind": "introspect", "type": "gx_relay_refresh"}, "introspection"),
-            ({"kind": "", "type": "gx_relay_refresh"}, "read-fast"),
-            ({"kind": None, "type": "introspect"}, "introspection"),
-            ({"kind": 0, "type": "ess_grid_setpoint"}, "remote-write"),
-            ({"type": "gx_relay_set_enabled"}, "remote-write"),
+            ({"kind": "", "type": "gx_relay_refresh"}, "diagnostic"),
+            ({"kind": None, "type": "introspect"}, "diagnostic"),
+            ({"kind": 0, "type": "ess_grid_setpoint"}, "diagnostic"),
+            ({"type": "gx_relay_set_enabled"}, "diagnostic"),
             ({"kind": "unknown", "type": "introspect"}, "diagnostic"),
             ({"kind": " introspect "}, "diagnostic"),
             ({}, "diagnostic"),

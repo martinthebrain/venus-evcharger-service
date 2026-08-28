@@ -337,7 +337,7 @@ def _battery_read_spec(defaults: configparser.SectionProxy, battery_service: str
         "prefix": str(defaults.get("AutoBatteryServicePrefix", "com.victronenergy.battery")).strip(),
         "path": str(defaults.get("AutoBatterySocPath", "/Dc/Battery/Soc")).strip(),
         "aggregate": "first-service" if not battery_service else "",
-        "interval": _gateway_read_interval(defaults, "DbusGatewayBatterySocReadIntervalSeconds", 4.0),
+        "interval": _gateway_read_interval(defaults, "DbusGatewayBatterySocReadIntervalSeconds", 3.0),
         "priority": "read",
     }
 

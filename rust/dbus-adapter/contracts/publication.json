@@ -1,0 +1,1766 @@
+{
+  "companion": {
+    "battery": {
+      "capacity_wh": {
+        "default": null,
+        "formatter": null,
+        "freshness_kind": "local_owned",
+        "path": "/Capacity",
+        "route": null,
+        "writeable": false
+      },
+      "connected": {
+        "default": 0,
+        "formatter": null,
+        "freshness_kind": "local_owned",
+        "path": "/Connected",
+        "route": null,
+        "writeable": false
+      },
+      "dc_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Dc/0/Power",
+        "route": null,
+        "writeable": false
+      },
+      "soc_percent": {
+        "default": null,
+        "formatter": null,
+        "freshness_kind": "local_owned",
+        "path": "/Soc",
+        "route": null,
+        "writeable": false
+      }
+    },
+    "grid": {
+      "ac_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/Power",
+        "route": null,
+        "writeable": false
+      },
+      "connected": {
+        "default": 0,
+        "formatter": null,
+        "freshness_kind": "local_owned",
+        "path": "/Connected",
+        "route": null,
+        "writeable": false
+      },
+      "l1_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/L1/Power",
+        "route": null,
+        "writeable": false
+      },
+      "l2_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/L2/Power",
+        "route": null,
+        "writeable": false
+      },
+      "l3_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/L3/Power",
+        "route": null,
+        "writeable": false
+      }
+    },
+    "pv_inverter": {
+      "ac_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/Power",
+        "route": null,
+        "writeable": false
+      },
+      "connected": {
+        "default": 0,
+        "formatter": null,
+        "freshness_kind": "local_owned",
+        "path": "/Connected",
+        "route": null,
+        "writeable": false
+      },
+      "l1_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/L1/Power",
+        "route": null,
+        "writeable": false
+      },
+      "l2_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/L2/Power",
+        "route": null,
+        "writeable": false
+      },
+      "l3_power_w": {
+        "default": 0.0,
+        "formatter": "watts",
+        "freshness_kind": "local_owned",
+        "path": "/Ac/L3/Power",
+        "route": null,
+        "writeable": false
+      }
+    }
+  },
+  "evcs": {
+    "ac_current_a": {
+      "default": 0,
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/Current",
+      "route": null,
+      "writeable": false
+    },
+    "ac_power_w": {
+      "default": 0,
+      "formatter": "watts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/Power",
+      "route": null,
+      "writeable": false
+    },
+    "ac_voltage_v": {
+      "default": 0,
+      "formatter": "volts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/Voltage",
+      "route": null,
+      "writeable": false
+    },
+    "auto_backend_mode": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/BackendMode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_battery_read_errors": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/BatteryReadErrors",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_backend": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerBackend",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_current_target": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerCurrentTarget",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_current_target_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerCurrentTargetAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_estimate_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerEstimateActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_estimate_source": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerEstimateSource",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_fault": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerFault",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_fault_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerFaultActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_retry_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerRetryActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_retry_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerRetryReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_retry_remaining": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerRetryRemaining",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_retry_source": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerRetrySource",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_status": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerStatus",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_transport_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerTransportActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_transport_detail": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerTransportDetail",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_transport_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerTransportReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_transport_source": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerTransportSource",
+      "route": null,
+      "writeable": false
+    },
+    "auto_charger_write_errors": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ChargerWriteErrors",
+      "route": null,
+      "writeable": false
+    },
+    "auto_contactor_fault_count": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorFaultCount",
+      "route": null,
+      "writeable": false
+    },
+    "auto_contactor_lockout_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorLockoutActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_contactor_lockout_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorLockoutAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_contactor_lockout_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorLockoutReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_contactor_lockout_reset": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorLockoutReset",
+      "route": {
+        "name": "reset_contactor_lockout",
+        "target": "auto_contactor_lockout_reset"
+      },
+      "writeable": true
+    },
+    "auto_contactor_lockout_source": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorLockoutSource",
+      "route": null,
+      "writeable": false
+    },
+    "auto_contactor_suspected_open": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorSuspectedOpen",
+      "route": null,
+      "writeable": false
+    },
+    "auto_contactor_suspected_welded": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ContactorSuspectedWelded",
+      "route": null,
+      "writeable": false
+    },
+    "auto_dbus_backoff_base_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DbusBackoffBaseSeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_dbus_backoff_base_seconds"
+      },
+      "writeable": true
+    },
+    "auto_dbus_backoff_max_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DbusBackoffMaxSeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_dbus_backoff_max_seconds"
+      },
+      "writeable": true
+    },
+    "auto_dbus_read_errors": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DbusReadErrors",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_grid_watts": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionGridWatts",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_profile": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionProfile",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_relay_intent": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionRelayIntent",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_soc_percent": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionSocPercent",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_start_threshold_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionStartThresholdWatts",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_state": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionState",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_state_code": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionStateCode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_stop_threshold_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionStopThresholdWatts",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_surplus_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionSurplusWatts",
+      "route": null,
+      "writeable": false
+    },
+    "auto_decision_threshold_mode": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/DecisionThresholdMode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_error_count": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ErrorCount",
+      "route": null,
+      "writeable": false
+    },
+    "auto_fault_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/FaultActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_fault_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/FaultReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_gateway_diagnostics_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/GatewayDiagnosticsAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_gateway_discovered_source_count": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/GatewayDiscoveredSourceCount",
+      "route": null,
+      "writeable": false
+    },
+    "auto_gateway_discovery_pending_work": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/GatewayDiscoveryPendingWork",
+      "route": null,
+      "writeable": false
+    },
+    "auto_gateway_discovery_state": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/GatewayDiscoveryState",
+      "route": null,
+      "writeable": false
+    },
+    "auto_gateway_unusable_source_count": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/GatewayUnusableSourceCount",
+      "route": null,
+      "writeable": false
+    },
+    "auto_grid_read_errors": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/GridReadErrors",
+      "route": null,
+      "writeable": false
+    },
+    "auto_grid_recovery_start_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/GridRecoveryStartSeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_grid_recovery_start_seconds"
+      },
+      "writeable": true
+    },
+    "auto_health": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/Health",
+      "route": null,
+      "writeable": false
+    },
+    "auto_health_code": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/HealthCode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_input_cache_hits": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/InputCacheHits",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_battery_read_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastBatteryReadAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_charger_estimate_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastChargerEstimateAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_charger_read_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastChargerReadAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_charger_transport_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastChargerTransportAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_dbus_read_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastDbusReadAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_grid_read_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastGridReadAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_pv_read_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastPvReadAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_shelly_read_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastShellyReadAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_successful_update_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastSuccessfulUpdateAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_last_switch_feedback_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LastSwitchFeedbackAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_learn_charge_power_alpha": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LearnChargePowerAlpha",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_learn_charge_power_alpha"
+      },
+      "writeable": true
+    },
+    "auto_learn_charge_power_enabled": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LearnChargePowerEnabled",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_learn_charge_power_enabled"
+      },
+      "writeable": true
+    },
+    "auto_learn_charge_power_max_age_seconds": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LearnChargePowerMaxAgeSeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_learn_charge_power_max_age_seconds"
+      },
+      "writeable": true
+    },
+    "auto_learn_charge_power_min_watts": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LearnChargePowerMinWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_learn_charge_power_min_watts"
+      },
+      "writeable": true
+    },
+    "auto_learn_charge_power_start_delay_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LearnChargePowerStartDelaySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_learn_charge_power_start_delay_seconds"
+      },
+      "writeable": true
+    },
+    "auto_learn_charge_power_window_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/LearnChargePowerWindowSeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_learn_charge_power_window_seconds"
+      },
+      "writeable": true
+    },
+    "auto_mainloop_heartbeat_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/MainloopHeartbeatAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_meter_backend": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/MeterBackend",
+      "route": null,
+      "writeable": false
+    },
+    "auto_min_soc": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/MinSoc",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_min_soc"
+      },
+      "writeable": true
+    },
+    "auto_pending_relay_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PendingRelayAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_candidate": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseCandidate",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_candidate_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseCandidateAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_current": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseCurrent",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_degraded_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseDegradedActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_downshift_delay_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseDownshiftDelaySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_downshift_delay_seconds"
+      },
+      "writeable": true
+    },
+    "auto_phase_downshift_margin_watts": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseDownshiftMarginWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_downshift_margin_watts"
+      },
+      "writeable": true
+    },
+    "auto_phase_lockout_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseLockoutActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_lockout_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseLockoutAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_lockout_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseLockoutReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_lockout_reset": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseLockoutReset",
+      "route": {
+        "name": "reset_phase_lockout",
+        "target": "auto_phase_lockout_reset"
+      },
+      "writeable": true
+    },
+    "auto_phase_lockout_target": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseLockoutTarget",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_mismatch_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseMismatchActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_mismatch_lockout_count": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseMismatchLockoutCount",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_mismatch_lockout_count"
+      },
+      "writeable": true
+    },
+    "auto_phase_mismatch_lockout_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseMismatchLockoutSeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_mismatch_lockout_seconds"
+      },
+      "writeable": true
+    },
+    "auto_phase_mismatch_retry_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseMismatchRetrySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_mismatch_retry_seconds"
+      },
+      "writeable": true
+    },
+    "auto_phase_observed": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseObserved",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_prefer_lowest_when_idle": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhasePreferLowestWhenIdle",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_prefer_lowest_when_idle"
+      },
+      "writeable": true
+    },
+    "auto_phase_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_supported_configured": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseSupportedConfigured",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_supported_effective": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseSupportedEffective",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_switching": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseSwitching",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_switching"
+      },
+      "writeable": true
+    },
+    "auto_phase_target": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseTarget",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_threshold_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseThresholdWatts",
+      "route": null,
+      "writeable": false
+    },
+    "auto_phase_upshift_delay_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseUpshiftDelaySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_upshift_delay_seconds"
+      },
+      "writeable": true
+    },
+    "auto_phase_upshift_headroom_watts": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PhaseUpshiftHeadroomWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_phase_upshift_headroom_watts"
+      },
+      "writeable": true
+    },
+    "auto_pv_read_errors": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/PvReadErrors",
+      "route": null,
+      "writeable": false
+    },
+    "auto_recovery_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/RecoveryActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_recovery_attempts": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/RecoveryAttempts",
+      "route": null,
+      "writeable": false
+    },
+    "auto_reference_charge_power_watts": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ReferenceChargePowerWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_reference_charge_power_watts"
+      },
+      "writeable": true
+    },
+    "auto_resume_soc": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ResumeSoc",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_resume_soc"
+      },
+      "writeable": true
+    },
+    "auto_runtime_overrides_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/RuntimeOverridesActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_runtime_overrides_path": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/RuntimeOverridesPath",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_boost_until": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledBoostUntil",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_enabled_days": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledEnabledDays",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_scheduled_enabled_days"
+      },
+      "writeable": true
+    },
+    "auto_scheduled_fallback_delay_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledFallbackDelaySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_scheduled_fallback_delay_seconds"
+      },
+      "writeable": true
+    },
+    "auto_scheduled_fallback_start": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledFallbackStart",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_latest_end_time": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledLatestEndTime",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_scheduled_latest_end_time"
+      },
+      "writeable": true
+    },
+    "auto_scheduled_night_boost_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledNightBoostActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_night_current": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledNightCurrent",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_scheduled_night_current"
+      },
+      "writeable": true
+    },
+    "auto_scheduled_reason": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledReason",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_reason_code": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledReasonCode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_state": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledState",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_state_code": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledStateCode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_target_date": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledTargetDate",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_target_day": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledTargetDay",
+      "route": null,
+      "writeable": false
+    },
+    "auto_scheduled_target_day_enabled": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ScheduledTargetDayEnabled",
+      "route": null,
+      "writeable": false
+    },
+    "auto_shelly_consecutive_errors": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ShellyConsecutiveErrors",
+      "route": null,
+      "writeable": false
+    },
+    "auto_shelly_last_error": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ShellyLastError",
+      "route": null,
+      "writeable": false
+    },
+    "auto_shelly_last_ok_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ShellyLastOkAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_shelly_read_errors": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ShellyReadErrors",
+      "route": null,
+      "writeable": false
+    },
+    "auto_shelly_retry_remaining": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ShellyRetryRemaining",
+      "route": null,
+      "writeable": false
+    },
+    "auto_shelly_state": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/ShellyState",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_available": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateAvailable",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_available_version": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateAvailableVersion",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_current_version": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateCurrentVersion",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_detail": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateDetail",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_last_check_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateLastCheckAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_last_run_age": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateLastRunAge",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_no_update_active": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateNoUpdateActive",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_run": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateRun",
+      "route": {
+        "name": "trigger_software_update",
+        "target": "auto_software_update_run"
+      },
+      "writeable": true
+    },
+    "auto_software_update_state": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateState",
+      "route": null,
+      "writeable": false
+    },
+    "auto_software_update_state_code": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SoftwareUpdateStateCode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_stale": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/Stale",
+      "route": null,
+      "writeable": false
+    },
+    "auto_stale_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StaleSeconds",
+      "route": null,
+      "writeable": false
+    },
+    "auto_start": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/AutoStart",
+      "route": {
+        "name": "set_auto_start",
+        "target": "auto_start"
+      },
+      "writeable": true
+    },
+    "auto_start_delay_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StartDelaySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_start_delay_seconds"
+      },
+      "writeable": true
+    },
+    "auto_start_surplus_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StartSurplusWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_start_surplus_watts"
+      },
+      "writeable": true
+    },
+    "auto_state": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/State",
+      "route": null,
+      "writeable": false
+    },
+    "auto_state_code": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StateCode",
+      "route": null,
+      "writeable": false
+    },
+    "auto_status_source": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StatusSource",
+      "route": null,
+      "writeable": false
+    },
+    "auto_stop_delay_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StopDelaySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_stop_delay_seconds"
+      },
+      "writeable": true
+    },
+    "auto_stop_surplus_delay_seconds": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StopSurplusDelaySeconds",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_stop_surplus_delay_seconds"
+      },
+      "writeable": true
+    },
+    "auto_stop_surplus_volatility_high_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StopSurplusVolatilityHighWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_stop_surplus_volatility_high_watts"
+      },
+      "writeable": true
+    },
+    "auto_stop_surplus_volatility_low_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StopSurplusVolatilityLowWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_stop_surplus_volatility_low_watts"
+      },
+      "writeable": true
+    },
+    "auto_stop_surplus_watts": {
+      "default": -1,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/StopSurplusWatts",
+      "route": {
+        "name": "set_auto_runtime_setting",
+        "target": "auto_stop_surplus_watts"
+      },
+      "writeable": true
+    },
+    "auto_switch_backend": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SwitchBackend",
+      "route": null,
+      "writeable": false
+    },
+    "auto_switch_feedback_closed": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SwitchFeedbackClosed",
+      "route": null,
+      "writeable": false
+    },
+    "auto_switch_feedback_mismatch": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SwitchFeedbackMismatch",
+      "route": null,
+      "writeable": false
+    },
+    "auto_switch_interlock_ok": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/SwitchInterlockOk",
+      "route": null,
+      "writeable": false
+    },
+    "auto_update_worker_duration_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/UpdateWorkerDurationSeconds",
+      "route": null,
+      "writeable": false
+    },
+    "auto_update_worker_pending": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/UpdateWorkerPending",
+      "route": null,
+      "writeable": false
+    },
+    "auto_update_worker_skipped": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/UpdateWorkerSkipped",
+      "route": null,
+      "writeable": false
+    },
+    "auto_write_command_duration_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/WriteCommandDurationSeconds",
+      "route": null,
+      "writeable": false
+    },
+    "auto_write_command_queue_lag_seconds": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "diagnostic",
+      "path": "/Auto/WriteCommandQueueLagSeconds",
+      "route": null,
+      "writeable": false
+    },
+    "charge_current_a": {
+      "default": 0,
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/Current",
+      "route": null,
+      "writeable": false
+    },
+    "charging_time_s": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/ChargingTime",
+      "route": null,
+      "writeable": false
+    },
+    "connected": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/Connected",
+      "route": null,
+      "writeable": false
+    },
+    "enable": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/Enable",
+      "route": {
+        "name": "set_enable",
+        "target": "enable"
+      },
+      "writeable": true
+    },
+    "energy_forward_kwh": {
+      "default": 0,
+      "formatter": "kwh",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/Energy/Forward",
+      "route": null,
+      "writeable": false
+    },
+    "l1_current_a": {
+      "default": 0,
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L1/Current",
+      "route": null,
+      "writeable": false
+    },
+    "l1_energy_forward_kwh": {
+      "default": 0,
+      "formatter": "kwh",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L1/Energy/Forward",
+      "route": null,
+      "writeable": false
+    },
+    "l1_power_w": {
+      "default": 0,
+      "formatter": "watts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L1/Power",
+      "route": null,
+      "writeable": false
+    },
+    "l1_voltage_v": {
+      "default": 0,
+      "formatter": "volts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L1/Voltage",
+      "route": null,
+      "writeable": false
+    },
+    "l2_current_a": {
+      "default": 0,
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L2/Current",
+      "route": null,
+      "writeable": false
+    },
+    "l2_energy_forward_kwh": {
+      "default": 0,
+      "formatter": "kwh",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L2/Energy/Forward",
+      "route": null,
+      "writeable": false
+    },
+    "l2_power_w": {
+      "default": 0,
+      "formatter": "watts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L2/Power",
+      "route": null,
+      "writeable": false
+    },
+    "l2_voltage_v": {
+      "default": 0,
+      "formatter": "volts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L2/Voltage",
+      "route": null,
+      "writeable": false
+    },
+    "l3_current_a": {
+      "default": 0,
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L3/Current",
+      "route": null,
+      "writeable": false
+    },
+    "l3_energy_forward_kwh": {
+      "default": 0,
+      "formatter": "kwh",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L3/Energy/Forward",
+      "route": null,
+      "writeable": false
+    },
+    "l3_power_w": {
+      "default": 0,
+      "formatter": "watts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L3/Power",
+      "route": null,
+      "writeable": false
+    },
+    "l3_voltage_v": {
+      "default": 0,
+      "formatter": "volts",
+      "freshness_kind": "local_owned",
+      "path": "/Ac/L3/Voltage",
+      "route": null,
+      "writeable": false
+    },
+    "max_current": {
+      "default": "",
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/MaxCurrent",
+      "route": {
+        "name": "set_current_setting",
+        "target": "max_current"
+      },
+      "writeable": true
+    },
+    "min_current": {
+      "default": "",
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/MinCurrent",
+      "route": {
+        "name": "set_current_setting",
+        "target": "min_current"
+      },
+      "writeable": true
+    },
+    "mode": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/Mode",
+      "route": {
+        "name": "set_mode",
+        "target": "mode"
+      },
+      "writeable": true
+    },
+    "phase_selection": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/PhaseSelection",
+      "route": {
+        "name": "set_phase_selection",
+        "target": "phase_selection"
+      },
+      "writeable": true
+    },
+    "phase_selection_active": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/PhaseSelectionActive",
+      "route": null,
+      "writeable": false
+    },
+    "session_energy_kwh": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/Session/Energy",
+      "route": null,
+      "writeable": false
+    },
+    "session_time_s": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/Session/Time",
+      "route": null,
+      "writeable": false
+    },
+    "set_current": {
+      "default": "",
+      "formatter": "amps",
+      "freshness_kind": "local_owned",
+      "path": "/SetCurrent",
+      "route": {
+        "name": "set_current_setting",
+        "target": "set_current"
+      },
+      "writeable": true
+    },
+    "start_stop": {
+      "default": 0,
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/StartStop",
+      "route": {
+        "name": "set_start_stop",
+        "target": "start_stop"
+      },
+      "writeable": true
+    },
+    "status": {
+      "default": 0,
+      "formatter": "status",
+      "freshness_kind": "local_owned",
+      "path": "/Status",
+      "route": null,
+      "writeable": false
+    },
+    "supported_phase_selections": {
+      "default": "",
+      "formatter": null,
+      "freshness_kind": "local_owned",
+      "path": "/SupportedPhaseSelections",
+      "route": null,
+      "writeable": false
+    }
+  },
+  "schema_version": 1
+}

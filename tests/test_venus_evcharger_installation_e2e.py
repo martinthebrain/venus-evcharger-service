@@ -56,16 +56,14 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
         return repo_copy
 
     def test_runit_entrypoints_replace_the_shell_process(self) -> None:
-        python_run_scripts = (
-            "deploy/venus/service_venus_evcharger/run",
-            "deploy/venus/service_venus_evcharger_dbus_adapter/run",
+        core_run = (REPO_ROOT / "deploy/venus/service_venus_evcharger/run").read_text(encoding="utf-8")
+        self.assertIn("exec python3 ", core_run)
+
+        adapter_run = (REPO_ROOT / "deploy/venus/service_venus_evcharger_dbus_adapter/run").read_text(
+            encoding="utf-8"
         )
-        for relative_path in python_run_scripts:
-            with self.subTest(relative_path=relative_path):
-                lines = (REPO_ROOT / relative_path).read_text(encoding="utf-8").splitlines()
-                python_commands = [line for line in lines if "python3 " in line]
-                self.assertEqual(len(python_commands), 1)
-                self.assertTrue(python_commands[0].startswith("exec python3 "))
+        self.assertNotIn("python3 ", adapter_run)
+        self.assertIn('exec "$DBUS_ADAPTER_BINARY" "$CONFIG_PATH"', adapter_run)
 
         observer_run = (REPO_ROOT / "deploy/venus/service_venus_evcharger_observer/run").read_text(encoding="utf-8")
         self.assertNotIn("python3 ", observer_run)
@@ -73,6 +71,16 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
 
     def test_observer_artifact_is_armv7_hard_float_elf(self) -> None:
         binary = REPO_ROOT / "deploy/venus/bin/venus-evcharger-forensic-observer"
+        header = binary.read_bytes()[:52]
+
+        self.assertGreaterEqual(len(header), 52)
+        self.assertEqual(header[:7], b"\x7fELF\x01\x01\x01")
+        self.assertEqual(struct.unpack_from("<H", header, 18)[0], 40)
+        self.assertNotEqual(struct.unpack_from("<I", header, 36)[0] & 0x400, 0)
+        self.assertNotEqual(binary.stat().st_mode & stat.S_IXUSR, 0)
+
+    def test_dbus_adapter_artifact_is_armv7_hard_float_elf(self) -> None:
+        binary = REPO_ROOT / "deploy/venus/bin/venus-evcharger-dbus-adapter"
         header = binary.read_bytes()[:52]
 
         self.assertGreaterEqual(len(header), 52)
@@ -141,6 +149,12 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
                 encoding="utf-8",
             )
             self._make_executable(rust_helper)
+            dbus_adapter = repo_copy / "deploy/venus/bin/venus-evcharger-dbus-adapter"
+            dbus_adapter.write_text(
+                f"#!/bin/sh\nprintf 'dbus-adapter %s\\n' \"$*\" >> {validation_log!s}\n",
+                encoding="utf-8",
+            )
+            self._make_executable(dbus_adapter)
 
             result = subprocess.run(
                 ["bash", str(repo_copy / "deploy/venus/install_venus_evcharger_service.sh")],
@@ -163,6 +177,7 @@ class TestVenusEvchargerInstallationEndToEnd(unittest.TestCase):
                 [
                     f"observer --validate-config {config_path}",
                     f"auto-input --validate-launch {config_path}",
+                    f"dbus-adapter --validate-launch {config_path}",
                 ],
             )
 

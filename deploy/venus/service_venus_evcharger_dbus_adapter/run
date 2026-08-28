@@ -6,6 +6,12 @@
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../../..")
 CONFIG_PATH="$REPO_DIR/deploy/venus/config.venus_evcharger.ini"
+DBUS_ADAPTER_BINARY="$REPO_DIR/deploy/venus/bin/venus-evcharger-dbus-adapter"
 exec 2>&1
 
-exec python3 "$(realpath "$REPO_DIR/venus_evcharger_dbus_adapter.py")" "$CONFIG_PATH"
+if [ ! -x "$DBUS_ADAPTER_BINARY" ]; then
+	echo "Native DBus adapter binary is missing or not executable: $DBUS_ADAPTER_BINARY" >&2
+	exit 1
+fi
+
+exec "$DBUS_ADAPTER_BINARY" "$CONFIG_PATH"

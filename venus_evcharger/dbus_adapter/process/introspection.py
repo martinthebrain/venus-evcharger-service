@@ -131,7 +131,7 @@ class DbusAdapterIntrospection:
         command_file: str,
         completion: CommandCompletion,
     ) -> CommandExecution:
-        raw_kind = command.get("kind") or command.get("type")
+        raw_kind = command.get("kind")
         if not raw_kind:
             return CommandExecution.immediate("dropped")
         kind = str(raw_kind)

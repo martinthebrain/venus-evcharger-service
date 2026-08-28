@@ -26,7 +26,7 @@ CONFIG_PATH="$SCRIPT_DIR/config.venus_evcharger.ini"
 GENERIC_SHELLY_HELPER="$REPO_DIR/venus_evcharger_generic_shelly_configuration.py"
 BOOT_HELPER="$SCRIPT_DIR/boot_venus_evcharger_service.sh"
 MAIN_ENTRYPOINT="$REPO_DIR/venus_evcharger_service.py"
-DBUS_ADAPTER_ENTRYPOINT="$REPO_DIR/venus_evcharger_dbus_adapter.py"
+DBUS_ADAPTER_ENTRYPOINT="$REPO_DIR/deploy/venus/bin/venus-evcharger-dbus-adapter"
 OBSERVER_ENTRYPOINT="$REPO_DIR/deploy/venus/bin/venus-evcharger-forensic-observer"
 AUTO_INPUT_HELPER="$REPO_DIR/deploy/venus/bin/venus-evcharger-auto-input-helper"
 CONFIGURE_HELPER="$SCRIPT_DIR/configure_venus_evcharger_service.sh"
@@ -57,14 +57,17 @@ if [ ! -f "$AUTO_INPUT_HELPER" ]; then
 	exit 1
 fi
 
+if [ ! -f "$DBUS_ADAPTER_ENTRYPOINT" ]; then
+	echo "Rust DBus adapter binary not found: $DBUS_ADAPTER_ENTRYPOINT" >&2
+	exit 1
+fi
+
 # Restore execute bits for all directly launched entrypoints.
 chmod a+x "$MAIN_ENTRYPOINT"
 chmod 755 "$MAIN_ENTRYPOINT"
 
-if [ -f "$DBUS_ADAPTER_ENTRYPOINT" ]; then
-	chmod a+x "$DBUS_ADAPTER_ENTRYPOINT"
-	chmod 755 "$DBUS_ADAPTER_ENTRYPOINT"
-fi
+chmod a+x "$DBUS_ADAPTER_ENTRYPOINT"
+chmod 755 "$DBUS_ADAPTER_ENTRYPOINT"
 
 if [ -f "$GENERIC_SHELLY_HELPER" ]; then
 	chmod a+x "$GENERIC_SHELLY_HELPER"
@@ -88,6 +91,10 @@ arm* | aarch64)
 	fi
 	if ! "$AUTO_INPUT_HELPER" --validate-launch "$CONFIG_PATH"; then
 		echo "Rust auto input helper rejected the active launch configuration." >&2
+		exit 1
+	fi
+	if ! "$DBUS_ADAPTER_ENTRYPOINT" --validate-launch "$CONFIG_PATH"; then
+		echo "Rust DBus adapter rejected the active launch configuration." >&2
 		exit 1
 	fi
 	;;

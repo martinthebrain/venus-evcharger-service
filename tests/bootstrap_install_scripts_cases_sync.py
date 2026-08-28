@@ -350,6 +350,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                 "auto-input-helper-binary\n",
                 encoding="utf-8",
             )
+            (source_dir / "deploy/venus/bin/venus-evcharger-dbus-adapter").write_text(
+                "dbus-adapter-binary\n",
+                encoding="utf-8",
+            )
             (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
                 "observer-binary\n",
                 encoding="utf-8",
@@ -517,6 +521,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
                 receipt["critical_files"]["deploy/venus/bin/venus-evcharger-forensic-observer"],
                 hashlib.sha256(b"observer-binary\n").hexdigest(),
             )
+            self.assertEqual(
+                receipt["critical_files"]["deploy/venus/bin/venus-evcharger-dbus-adapter"],
+                hashlib.sha256(b"dbus-adapter-binary\n").hexdigest(),
+            )
             for service_name, expected_run in service_run_contents.items():
                 relative_run = f"deploy/venus/{service_name}/run"
                 self.assertEqual(
@@ -553,6 +561,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/bin").mkdir(parents=True)
             (source_dir / "deploy/venus/bin/venus-evcharger-auto-input-helper").write_text(
                 "auto-input-helper-binary\n",
+                encoding="utf-8",
+            )
+            (source_dir / "deploy/venus/bin/venus-evcharger-dbus-adapter").write_text(
+                "dbus-adapter-binary\n",
                 encoding="utf-8",
             )
             (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(
@@ -620,6 +632,10 @@ class _BootstrapInstallScriptsSyncCases(_BootstrapInstallScriptsBase):
             (source_dir / "deploy/venus/bin").mkdir(parents=True)
             (source_dir / "deploy/venus/bin/venus-evcharger-auto-input-helper").write_text(
                 "auto-input-helper-binary\n",
+                encoding="utf-8",
+            )
+            (source_dir / "deploy/venus/bin/venus-evcharger-dbus-adapter").write_text(
+                "dbus-adapter-binary\n",
                 encoding="utf-8",
             )
             (source_dir / "deploy/venus/bin/venus-evcharger-forensic-observer").write_text(

@@ -83,7 +83,7 @@ def command_matches_filters(
 
 
 def command_kind(command: CommandMapping) -> str:
-    return str(command.get("kind") or command.get("type") or "")
+    return str(command.get("kind") or "")
 
 
 def stale_coalesced_paths(
