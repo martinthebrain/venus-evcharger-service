@@ -72,7 +72,7 @@ pub enum BackendDiagnosticsPayload {
 /// Complete bounded observer snapshot.
 #[derive(Clone, Debug, Serialize)]
 pub struct ForensicSnapshot {
-    /// Epoch timestamp used for cooldown and incident naming.
+    /// Epoch timestamp used for incident naming and recovery records.
     pub timestamp: f64,
     config_path: String,
     /// Semantic gateway diagnostics.

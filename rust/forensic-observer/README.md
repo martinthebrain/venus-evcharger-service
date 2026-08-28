@@ -34,4 +34,7 @@ venus-evcharger-forensic-observer --validate-config \
 ```
 
 The observer stores incident bundles only on recognized removable storage. It
-does not use internal flash as a fallback.
+does not use internal flash as a fallback. One uninterrupted failure episode
+creates one bundle. After confirmed recovery, the observer adds one atomic
+`recovery.json` record to that bundle instead of producing periodic duplicate
+incidents.
