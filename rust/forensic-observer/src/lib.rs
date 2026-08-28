@@ -18,6 +18,7 @@ pub(crate) mod gateway_sample;
 pub(crate) mod gateway_validation;
 pub mod ini;
 pub mod probe;
+pub(crate) mod recovery;
 pub mod runtime;
 pub mod snapshot;
 pub mod system_activity;

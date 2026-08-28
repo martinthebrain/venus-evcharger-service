@@ -29,7 +29,7 @@ from tests.support.dbus_gateway_adapter_harness import (
     time,
 )
 from venus_evcharger.ipc.energy import EnergyRefreshRequest
-from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+from venus_evcharger.dbus_adapter.process.health_regulation import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.config import logging_level_from_config
 
 

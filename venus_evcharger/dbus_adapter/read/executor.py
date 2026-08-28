@@ -17,12 +17,9 @@ from venus_evcharger.dbus_adapter.read.aggregate import (
     AggregateStore,
 )
 from venus_evcharger.dbus_adapter.read.protocols import DbusReadAdapter
-from venus_evcharger.dbus_adapter.read.pv import (
-    PV_MEMBER_ERROR_BACKOFF_SECONDS,
-    configured_pv_aggregate_members,
-    dc_pv_members,
-)
+from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS
 from venus_evcharger.dbus_adapter.read.pv_last_good import PvAggregateContinuity
+from venus_evcharger.dbus_adapter.read.pv_poll_plan import plan_pv_aggregate_read
 from venus_evcharger.dbus_adapter.read.spec import (
     ReadSpec,
     read_spec_optional_confidence,
@@ -229,33 +226,16 @@ class DbusReadExecutor:
         spec: ReadSpec,
         completion: ReadCompletion,
     ) -> CommandOutcome:
-        configured_members = configured_pv_aggregate_members(spec)
-        explicit_members = (
-            [*configured_members, *dc_pv_members(spec)]
-            if configured_members
-            else None
-        )
-        members, held_state = self._pv_continuity.plan(
+        planned = plan_pv_aggregate_read(
+            self._pv_continuity,
             key,
             spec,
-            explicit_members=explicit_members,
+            completion,
         )
-        if held_state is not None:
-            self._complete_aggregate(key, held_state)
+        if isinstance(planned, AggregateState):
+            self._complete_aggregate(key, planned)
             return "applied"
-        if not members:
-            raise RuntimeError("No available AC or DC PV source candidates")
-        return self._poll_aggregate_step(
-            AggregateStepPlan(
-                key=key,
-                signature=(PV_TOTAL_AGGREGATE, tuple(members)),
-                members=tuple(members),
-                completion=completion,
-                ignore_member_errors=True,
-                empty_confidence=read_spec_optional_confidence(spec),
-                record_discovery_values=not configured_members,
-            )
-        )
+        return self._poll_aggregate_step(planned)
 
     def _poll_first_service(
         self,
@@ -368,12 +348,7 @@ class DbusReadExecutor:
                 continuation.service,
                 continuation.path,
             )
-        self._record_aggregate_member(
-            continuation.state,
-            continuation.service,
-            continuation.path,
-            value,
-        )
+        self._record_aggregate_member(continuation.state, continuation.service, continuation.path, value)
         continuation.state.index += 1
         continuation.completion(
             self._aggregate_step_outcome(
@@ -419,12 +394,7 @@ class DbusReadExecutor:
             continuation.service,
             continuation.path,
         )
-        self._record_aggregate_member(
-            continuation.state,
-            continuation.service,
-            continuation.path,
-            None,
-        )
+        self._record_aggregate_member(continuation.state, continuation.service, continuation.path, None)
         continuation.state.index += 1
         continuation.completion(
             self._aggregate_step_outcome(

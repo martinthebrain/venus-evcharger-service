@@ -11,7 +11,6 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
-from dataclasses import dataclass
 
 from venus_evcharger.dbus_adapter.health.backpressure import backpressure_snapshot
 from venus_evcharger.dbus_adapter.health.freshness import (
@@ -28,21 +27,13 @@ from venus_evcharger.dbus_adapter.health.gui import (
 )
 from venus_evcharger.dbus_adapter.health.history import append_health_log
 from venus_evcharger.dbus_adapter.health.latency import operation_p95_ms
-from venus_evcharger.dbus_adapter.health.queue import (
-    ADVISORY_QUEUE_CLASSES,
-    command_queue_class_name,
-    critical_queue_operation_count,
-    queue_class_health,
-    queue_health,
-)
+from venus_evcharger.dbus_adapter.health.queue import critical_queue_operation_count, queue_class_health, queue_health
 from venus_evcharger.dbus_adapter.health.slo import (
-    GatewayPressureState,
     SloThresholds,
     core_read_missing_count,
     core_read_nonfresh_count,
     effective_gui_max_age_seconds,
     max_core_read_age,
-    regulated_publish_burst,
     runtime_pressure_state,
     slo_checks_from_observed,
     slo_payload,
@@ -53,6 +44,13 @@ from venus_evcharger.dbus_adapter.health.state import (
     GatewayHealthStateLatch,
     operational_health_state,
     performance_health_state,
+)
+from venus_evcharger.dbus_adapter.process.health_regulation import (
+    GatewayControlSnapshot,
+    apply_control_regulation,
+)
+from venus_evcharger.dbus_adapter.process.health_regulation import (
+    suspend_advisory_work as suspend_advisory_gateway_work,
 )
 from venus_evcharger.dbus_adapter.process.protocols.health import DbusAdapterHealthContext
 from venus_evcharger.dbus_adapter.process.resource_health import (
@@ -72,26 +70,6 @@ SESSION_ACTIVE_POWER_WATTS = 50.0
 SESSION_ACTIVE_CURRENT_AMPS = 0.2
 MIN_PUBLICATION_SCHEDULER_TOLERANCE_SECONDS = 0.05
 MAX_TICK_CONTROL_SNAPSHOT_AGE_SECONDS = 1.0
-
-
-@dataclass(frozen=True, slots=True)
-class GatewayControlSnapshot:
-    """One coherent health/control evaluation shared by a gateway tick."""
-
-    captured_at: float
-    monotonic_at: float
-    health: CommandPayload
-    queue_age_seconds: float
-    core_read_age_seconds: float
-    eventloop_gap_ms: float
-    eventloop_max_duration_ms: float
-    resource_state: str
-    pressure_state: GatewayPressureState
-    stale_core_reads: tuple[str, ...]
-    critical_read_operations: int
-    critical_queue_operations: int
-    operation_p95_ms: float
-
 
 class DbusAdapterHealth:
     def __init__(self, context: DbusAdapterHealthContext) -> None:
@@ -429,35 +407,25 @@ class DbusAdapterHealth:
         snapshot: GatewayControlSnapshot | None = None,
     ) -> GatewayControlSnapshot:
         context = self._context
-        control = self.control_snapshot() if snapshot is None else snapshot
-        if control is self._last_regulated_snapshot:
+        control, regulation_required = self._regulation_target(snapshot)
+        if not regulation_required:
             return control
-        self._last_regulated_snapshot = control
-        thresholds = self.slo_thresholds()
-        context.write_scheduler.set_dynamic_local_publish_burst(
-            regulated_publish_burst(
-                queue_age=control.queue_age_seconds,
-                eventloop_gap_ms=control.eventloop_gap_ms,
-                base_burst=context.write_scheduler.local_publish_burst_limit,
-                thresholds=thresholds,
-                pressure_state=control.pressure_state,
-            ),
-            pressure_state=control.pressure_state,
-        )
-        if control.stale_core_reads:
-            context.read_scheduler.expedite_healthy(control.stale_core_reads)
-        circuit_state = str(
-            control.health.get(
-                "operational_state",
-                control.health.get("state", "ok"),
-            )
-        )
-        if circuit_state != "ok" or control.pressure_state != "ok":
+        if apply_control_regulation(context, control, self.slo_thresholds()):
             self.suspend_advisory_work(
                 monotonic_at=control.monotonic_at,
                 captured_at=control.captured_at,
             )
         return control
+
+    def _regulation_target(
+        self,
+        snapshot: GatewayControlSnapshot | None,
+    ) -> tuple[GatewayControlSnapshot, bool]:
+        control = self.control_snapshot() if snapshot is None else snapshot
+        if control is self._last_regulated_snapshot:
+            return control, False
+        self._last_regulated_snapshot = control
+        return control, True
 
     def suspend_advisory_work(
         self,
@@ -465,24 +433,11 @@ class DbusAdapterHealth:
         monotonic_at: float,
         captured_at: float,
     ) -> None:
-        context = self._context
-        if context.discovery.last_success_at > 0.0:
-            context.discovery.defer_for(
-                monotonic_at=monotonic_at,
-                captured_at=captured_at,
-                seconds=60.0,
-            )
-        context._last_introspection_full_scan_at = max(
-            context._last_introspection_full_scan_at,
-            captured_at,
+        suspend_advisory_gateway_work(
+            self._context,
+            monotonic_at=monotonic_at,
+            captured_at=captured_at,
         )
-        for path, command in context.write_scheduler.pending_snapshot().physical:
-            if context.operation_broker.owns_path(path):
-                continue
-            if command_queue_class_name(command) not in ADVISORY_QUEUE_CLASSES:
-                continue
-            context.write_scheduler.remove_pending(path, command)
-            context.write_scheduler.record_lifecycle(command, "dropped")
 
     def max_publication_field_age(
         self,

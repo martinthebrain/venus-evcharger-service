@@ -12,10 +12,11 @@ from tests.support.dbus_gateway_adapter_harness import (
     Path,
     gateway_paths,
     process_health_module,
+    process_health_regulation_module,
     tempfile,
 )
 from venus_evcharger.dbus_adapter.health.slo import SloThresholds
-from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+from venus_evcharger.dbus_adapter.process.health_regulation import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.read.pv_dormancy import PvDormancyEvidence
 
 
@@ -439,7 +440,7 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
             adapter.health_role.suspend_advisory_work = MagicMock()
 
             with patch.object(
-                process_health_module,
+                process_health_regulation_module,
                 "regulated_publish_burst",
                 return_value=4,
             ) as regulated_publish_burst:

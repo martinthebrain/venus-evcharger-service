@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use fs2::FileExt;
-use serde::Serialize;
 use serde_json::Value;
 
 use crate::config::ObserverConfig;
@@ -19,15 +18,17 @@ use crate::snapshot::{ForensicSnapshot, slug_text};
 pub const DEFAULT_STORAGE_LOCK_PATH: &str = "/run/lock/removable-storage-maintenance.lock";
 /// Default Linux mount table.
 pub const DEFAULT_MOUNTS_PATH: &str = "/proc/mounts";
-const DEFAULT_FORENSIC_SUBDIR: &str = "venus-evcharger-forensics";
+pub(crate) const DEFAULT_FORENSIC_SUBDIR: &str = "venus-evcharger-forensics";
 const SNAPSHOT_FILENAME: &str = "snapshot.json";
 const REDACTED_CONFIG_FILENAME: &str = "config.redacted.ini";
-const RECOVERY_FILENAME: &str = "recovery.json";
+pub(crate) const RECOVERY_FILENAME: &str = "recovery.json";
 const WRITE_PROBE_FILENAME: &str = ".write-test";
 const MAX_MOUNTS_BYTES: u64 = 1_048_576;
 const SECRET_KEYS: [&str; 4] = ["password", "token", "secret", "auth"];
 const MOUNT_PREFIXES: [&str; 3] = ["/media/", "/run/media/", "/mnt/"];
 const DEVICE_PREFIXES: [&str; 3] = ["/dev/sd", "/dev/mmcblk", "/dev/disk/"];
+
+pub(crate) use crate::recovery::write_recovery_with_lease;
 
 /// Non-blocking shared lease held while one incident writes to removable storage.
 pub struct StorageLease {
@@ -142,47 +143,6 @@ pub fn write_incident_with_lease(
     write_incident(&log_dir, config, snapshot, reasons).map(Some)
 }
 
-/// Add one atomic recovery record to the incident that opened an episode.
-///
-/// The incident path must still belong to a recognized mounted removable
-/// storage device. A busy maintenance lock or unavailable original incident
-/// directory is reported as a successful deferral.
-///
-/// # Errors
-///
-/// Returns an error when lock coordination, serialization, or atomic
-/// persistence fails.
-pub(crate) fn write_recovery_with_lease(
-    incident_path: &Path,
-    incident_started_at: f64,
-    initial_reasons: &[String],
-    snapshot: &ForensicSnapshot,
-    duration: Duration,
-    mounts_path: &Path,
-    lock_path: &Path,
-) -> Result<bool> {
-    let Some(_lease) = StorageLease::try_acquire(lock_path)? else {
-        return Ok(false);
-    };
-    let mounts = read_mounts(mounts_path);
-    let candidates = mounted_storage_candidates(&mounts);
-    let accepted_parent = candidates
-        .iter()
-        .map(|candidate| candidate.join(DEFAULT_FORENSIC_SUBDIR))
-        .any(|directory| incident_path.parent() == Some(directory.as_path()));
-    if !accepted_parent || !incident_path.is_dir() {
-        return Ok(false);
-    }
-    write_recovery(
-        incident_path,
-        incident_started_at,
-        initial_reasons,
-        snapshot,
-        duration,
-    )?;
-    Ok(true)
-}
-
 /// Write one immutable, atomically published incident bundle.
 ///
 /// # Errors
@@ -248,62 +208,6 @@ fn write_incident_files(
     )
     .map_err(|error| ObserverError::storage("write redacted config", &error))?;
     Ok(())
-}
-
-#[derive(Serialize)]
-struct RecoveryRecord<'a> {
-    schema_version: u8,
-    state: &'static str,
-    incident_started_at: f64,
-    recovered_at: f64,
-    duration_seconds: f64,
-    initial_reasons: &'a [String],
-}
-
-fn write_recovery(
-    incident_path: &Path,
-    incident_started_at: f64,
-    initial_reasons: &[String],
-    snapshot: &ForensicSnapshot,
-    duration: Duration,
-) -> Result<()> {
-    if !incident_started_at.is_finite() || !snapshot.timestamp.is_finite() {
-        return Err(ObserverError::Storage(
-            "forensic recovery timestamps must be finite".to_owned(),
-        ));
-    }
-    let final_path = incident_path.join(RECOVERY_FILENAME);
-    if final_path.is_file() {
-        return Ok(());
-    }
-    let staging_path = incident_path.join(format!(
-        ".{RECOVERY_FILENAME}.staging-{}",
-        std::process::id()
-    ));
-    let mut file = File::create(&staging_path)
-        .map_err(|error| ObserverError::storage("create recovery staging artifact", &error))?;
-    let record = RecoveryRecord {
-        schema_version: 1,
-        state: "recovered",
-        incident_started_at,
-        recovered_at: snapshot.timestamp,
-        duration_seconds: duration.as_secs_f64(),
-        initial_reasons,
-    };
-    let result = serde_json::to_writer_pretty(&mut file, &record)
-        .map_err(|error| ObserverError::Storage(format!("encode recovery artifact: {error}")))
-        .and_then(|()| {
-            file.write_all(b"\n")
-                .map_err(|error| ObserverError::storage("finish recovery artifact", &error))
-        })
-        .and_then(|()| {
-            fs::rename(&staging_path, &final_path)
-                .map_err(|error| ObserverError::storage("publish recovery artifact", &error))
-        });
-    if result.is_err() {
-        let _ignored = fs::remove_file(&staging_path);
-    }
-    result
 }
 
 fn redacted_line(line: &str) -> String {
@@ -372,10 +276,10 @@ fn civil_from_days(days_since_epoch: i64) -> (i64, i64, i64) {
 mod tests {
     use super::{
         StorageLease, mounted_storage_candidates, redact_config_text, utc_stamp, write_incident,
-        write_recovery,
     };
     use crate::config::ObserverConfig;
     use crate::ini::IniDocument;
+    use crate::recovery::write_recovery;
     use crate::snapshot::ForensicSnapshot;
     use fs2::FileExt;
     use std::fs::{self, OpenOptions};

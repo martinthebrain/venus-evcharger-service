@@ -14,7 +14,7 @@ from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
 from venus_evcharger.ipc.energy import EnergyTopologySnapshot
 
 if TYPE_CHECKING:
-    from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+    from venus_evcharger.dbus_adapter.process.health_regulation import GatewayControlSnapshot
 
 _T = TypeVar("_T")
 

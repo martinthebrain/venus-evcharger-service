@@ -15,7 +15,7 @@ from typing import TypeGuard, TypeVar
 from venus_evcharger.dbus_adapter.async_broker import DbusMethodCall, dbus_call_operation
 from venus_evcharger.dbus_adapter.contracts import CommandOutcome
 from venus_evcharger.dbus_adapter.dbus_errors import DBUS_GATEWAY_OPERATION_ERRORS
-from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+from venus_evcharger.dbus_adapter.process.health_regulation import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.io import DbusAdapterIoContext
 from venus_evcharger.dbus_adapter.rate import DbusOperationDeferred
 from venus_evcharger.dbus_adapter.read.keys import CORE_ENERGY_READ_KEYS, SEMANTIC_ENERGY_READ_KEYS

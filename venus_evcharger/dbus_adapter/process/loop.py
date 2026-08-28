@@ -15,7 +15,7 @@ import time
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 
-from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+from venus_evcharger.dbus_adapter.process.health_regulation import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.process.protocols.loop import DbusAdapterLoopContext
 from venus_evcharger.dbus_adapter.tick_policy import (
     TickDemand,

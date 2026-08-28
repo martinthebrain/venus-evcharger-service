@@ -46,6 +46,7 @@ with patch.dict(
     import venus_evcharger.dbus_adapter.health.slo as health_slo_module
     import venus_evcharger.dbus_adapter.jsonl as jsonl_module
     import venus_evcharger.dbus_adapter.process.config as process_config_module
+    import venus_evcharger.dbus_adapter.process.health_regulation as process_health_regulation_module
     import venus_evcharger.dbus_adapter.process.health as process_health_module
     import venus_evcharger.dbus_adapter.process.introspection as introspection_module
     import venus_evcharger.dbus_adapter.process.introspection_snapshot as introspection_snapshot_module
@@ -417,6 +418,7 @@ __all__ = [
     "logging",
     "patch",
     "process_config_module",
+    "process_health_regulation_module",
     "process_health_module",
     "process_io_module",
     "process_loop_module",
