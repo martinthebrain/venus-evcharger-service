@@ -136,6 +136,12 @@ class DbusAdapterLoopMutationContracts(unittest.TestCase):
     def test_one_shot_timer_rearms_at_the_actual_work_deadline(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             adapter = self._adapter(temp_dir)
+            adapter._next_work_tick_monotonic = 0.0
+            self.assertEqual(
+                adapter.loop_role._next_timer_delay(),
+                adapter.min_tick_seconds,
+            )
+
             adapter._next_work_tick_monotonic = 12.0
             install_mock(adapter.loop_role, "tick", MagicMock(return_value=True))
             with (

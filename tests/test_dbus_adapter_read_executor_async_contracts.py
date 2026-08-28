@@ -227,6 +227,46 @@ class DbusReadExecutorAsyncContractTests(unittest.TestCase):
         self.assertEqual(state.index, 1)
         completion.assert_called_once_with("deferred")
 
+    def test_official_pv_aggregate_members_do_not_duplicate_discovery_records(self) -> None:
+        executor, adapter = self._executor()
+        adapter.circuit.optional_source_interval_factor.return_value = 1.0
+        state = AggregateState(("pv-total", ()), empty_confidence=0.2)
+        success_completion = MagicMock()
+        success = AggregateStepContinuation(
+            key="pv_power_w",
+            state=state,
+            service="com.victronenergy.system",
+            path="/Ac/PvOnGrid/Total/Power",
+            member_count=2,
+            ignore_member_errors=True,
+            completion=success_completion,
+            record_discovery_values=False,
+        )
+
+        executor._complete_aggregate_member(success, 1250.0)
+
+        adapter.energy_discovery.record_pv_value.assert_not_called()
+        success_completion.assert_called_once_with("deferred")
+
+        error_completion = MagicMock()
+        error = AggregateStepContinuation(
+            key="pv_power_w",
+            state=state,
+            service="com.victronenergy.system",
+            path="/Dc/Pv/Power",
+            member_count=2,
+            ignore_member_errors=True,
+            completion=error_completion,
+            record_discovery_values=False,
+        )
+        failure = RuntimeError("temporarily unavailable")
+
+        executor._complete_aggregate_error(error, failure)
+
+        adapter.energy_discovery.record_pv_error.assert_not_called()
+        self.assertEqual(state.index, 2)
+        error_completion.assert_called_once_with("applied")
+
     def test_official_pv_aggregate_replaces_member_fanout_but_keeps_dc_input(self) -> None:
         executor, _adapter = self._executor()
         completion = MagicMock()
