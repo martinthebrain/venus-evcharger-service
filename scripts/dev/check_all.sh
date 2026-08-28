@@ -5,6 +5,19 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 REPO_DIR=$(realpath "$SCRIPT_DIR/../..")
 PROJECT_PYTHON="$REPO_DIR/.venv-ruff/bin/python"
+RUN_PYTHON_TESTS=true
+
+usage() {
+	echo "Usage: $0 [--skip-python-tests]" >&2
+	exit 2
+}
+
+if [ "$#" -gt 0 ]; then
+	[ "$1" = "--skip-python-tests" ] || usage
+	RUN_PYTHON_TESTS=false
+	shift
+fi
+[ "$#" -eq 0 ] || usage
 
 if [ -x "$PROJECT_PYTHON" ]; then
 	PYTHON=("$PROJECT_PYTHON")
@@ -43,7 +56,11 @@ echo "[8/10] Lint"
 bash "$SCRIPT_DIR/run_lint.sh"
 
 echo "[9/10] Unit tests"
-"${PYTHON[@]}" -m unittest discover -s tests -p 'test_*.py'
+if [ "$RUN_PYTHON_TESTS" = true ]; then
+	"${PYTHON[@]}" -m unittest discover -s tests -p 'test_*.py'
+else
+	echo "Deferred to the instrumented coverage gate"
+fi
 
 echo "[10/10] Type check"
 bash "$SCRIPT_DIR/run_typecheck.sh"
