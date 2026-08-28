@@ -216,6 +216,17 @@ impl QueueScheduler {
         }
     }
 
+    pub(super) fn runtime_work_allowed(
+        command: &Map<String, Value>,
+        pressure: PressureState,
+    ) -> bool {
+        // Local service publications are already bounded by the pressure-adjusted
+        // burst and class budgets. Suppressing them here would make missing GUI
+        // fields sustain the SLO pressure that prevents those fields from being
+        // published.
+        is_publication(command_kind(command)) || Self::command_allowed(command, pressure)
+    }
+
     pub(super) fn budget_available(&mut self, command: &Map<String, Value>) -> bool {
         let now = Instant::now();
         self.prune(now);

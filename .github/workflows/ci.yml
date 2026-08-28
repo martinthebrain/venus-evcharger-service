@@ -43,8 +43,11 @@ jobs:
           rustup toolchain install 1.88.0 --profile minimal --component rustfmt,clippy
           rustup default 1.88.0
 
-      - name: Run syntax, tests, and typecheck
-        run: bash ./scripts/dev/check_all.sh
+      - name: Run syntax, Rust tests, lint, and typecheck
+        run: bash ./scripts/dev/check_all.sh --skip-python-tests
+
+      - name: Run Python tests and coverage gates
+        run: bash ./scripts/dev/run_coverage.sh
 
       - name: Verify pinned ARMv7 observer artifact
         run: |
@@ -63,9 +66,6 @@ jobs:
 
       - name: Build and validate developer documentation
         run: make docs-check
-
-      - name: Run unit and platform coverage gates
-        run: bash ./scripts/dev/run_coverage.sh
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5

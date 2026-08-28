@@ -222,7 +222,7 @@ impl AdapterRuntime {
             if command_deadline_expired(&command, captured_at) {
                 continue;
             }
-            if !QueueScheduler::command_allowed(&command, pressure)
+            if !QueueScheduler::runtime_work_allowed(&command, pressure)
                 || !self.queue_scheduler.budget_available(&command)
             {
                 self.fast_server.defer(command);
@@ -268,7 +268,7 @@ impl AdapterRuntime {
                 self.finish_command(&path, &command, "expired", captured_at)?;
                 continue;
             }
-            if !QueueScheduler::command_allowed(&command, pressure) {
+            if !QueueScheduler::runtime_work_allowed(&command, pressure) {
                 if pressure != PressureState::Ok && is_advisory(&command) {
                     self.finish_command(&path, &command, "dropped", captured_at)?;
                 }

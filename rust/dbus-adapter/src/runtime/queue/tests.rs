@@ -80,6 +80,36 @@ fn configured_budgets_and_pressure_caps_are_enforced() -> Result<(), String> {
 }
 
 #[test]
+fn bounded_publications_can_break_their_own_slo_pressure_feedback() -> Result<(), String> {
+    let config = IniConfig::parse("[DEFAULT]\nDbusGatewayLocalPublishBurstLimit=20\n")?;
+    let mut scheduler = QueueScheduler::from_config(&config);
+    let publication = object(&json!({
+        "kind": "publish_evcs_fields",
+        "publication_priority": "live",
+        "priority": "publish"
+    }));
+
+    assert!(!QueueScheduler::command_allowed(
+        &publication,
+        PressureState::Slow
+    ));
+    assert!(QueueScheduler::runtime_work_allowed(
+        &publication,
+        PressureState::Slow
+    ));
+    assert!(QueueScheduler::runtime_work_allowed(
+        &publication,
+        PressureState::Protective
+    ));
+
+    scheduler.update_pressure(PressureState::Protective, 10.0, 0.0, 500.0);
+    assert!(scheduler.budget_available(&publication));
+    scheduler.record_attempt(&publication);
+    assert!(!scheduler.budget_available(&publication));
+    Ok(())
+}
+
+#[test]
 fn every_python_queue_budget_key_is_configurable() -> Result<(), String> {
     let config = IniConfig::parse(
         "[DEFAULT]\n\
