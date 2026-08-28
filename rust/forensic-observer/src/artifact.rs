@@ -18,14 +18,17 @@ use crate::snapshot::{ForensicSnapshot, slug_text};
 pub const DEFAULT_STORAGE_LOCK_PATH: &str = "/run/lock/removable-storage-maintenance.lock";
 /// Default Linux mount table.
 pub const DEFAULT_MOUNTS_PATH: &str = "/proc/mounts";
-const DEFAULT_FORENSIC_SUBDIR: &str = "venus-evcharger-forensics";
+pub(crate) const DEFAULT_FORENSIC_SUBDIR: &str = "venus-evcharger-forensics";
 const SNAPSHOT_FILENAME: &str = "snapshot.json";
 const REDACTED_CONFIG_FILENAME: &str = "config.redacted.ini";
+pub(crate) const RECOVERY_FILENAME: &str = "recovery.json";
 const WRITE_PROBE_FILENAME: &str = ".write-test";
 const MAX_MOUNTS_BYTES: u64 = 1_048_576;
 const SECRET_KEYS: [&str; 4] = ["password", "token", "secret", "auth"];
 const MOUNT_PREFIXES: [&str; 3] = ["/media/", "/run/media/", "/mnt/"];
 const DEVICE_PREFIXES: [&str; 3] = ["/dev/sd", "/dev/mmcblk", "/dev/disk/"];
+
+pub(crate) use crate::recovery::write_recovery_with_lease;
 
 /// Non-blocking shared lease held while one incident writes to removable storage.
 pub struct StorageLease {
@@ -128,17 +131,16 @@ pub fn write_incident_with_lease(
     reasons: &[String],
     mounts_path: &Path,
     lock_path: &Path,
-) -> Result<bool> {
+) -> Result<Option<PathBuf>> {
     let Some(_lease) = StorageLease::try_acquire(lock_path)? else {
-        return Ok(false);
+        return Ok(None);
     };
     let mounts = read_mounts(mounts_path);
     let candidates = mounted_storage_candidates(&mounts);
     let Some(log_dir) = first_writable_log_dir(&candidates) else {
-        return Ok(false);
+        return Ok(None);
     };
-    write_incident(&log_dir, config, snapshot, reasons)?;
-    Ok(true)
+    write_incident(&log_dir, config, snapshot, reasons).map(Some)
 }
 
 /// Write one immutable, atomically published incident bundle.
@@ -277,6 +279,7 @@ mod tests {
     };
     use crate::config::ObserverConfig;
     use crate::ini::IniDocument;
+    use crate::recovery::write_recovery;
     use crate::snapshot::ForensicSnapshot;
     use fs2::FileExt;
     use std::fs::{self, OpenOptions};
@@ -374,6 +377,40 @@ mod tests {
         assert!(!redacted.contains("also-secret"));
         assert!(redacted.contains("Password=<redacted>"));
         assert!(first_path.join("snapshot.json").is_file());
+        let mut recovery_snapshot = snapshot.clone();
+        recovery_snapshot.timestamp = 951_827_756.0;
+        assert!(
+            write_recovery(
+                first_path,
+                snapshot.timestamp,
+                &reasons,
+                &recovery_snapshot,
+                std::time::Duration::from_secs(60),
+            )
+            .is_ok()
+        );
+        assert!(
+            write_recovery(
+                first_path,
+                snapshot.timestamp,
+                &reasons,
+                &recovery_snapshot,
+                std::time::Duration::from_secs(60),
+            )
+            .is_ok()
+        );
+        let recovery = fs::read_to_string(first_path.join("recovery.json"));
+        assert!(recovery.is_ok());
+        let recovery: serde_json::Value = recovery
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        assert_eq!(recovery["schema_version"], 1);
+        assert_eq!(recovery["state"], "recovered");
+        assert_eq!(recovery["incident_started_at"], 951_827_696.0);
+        assert_eq!(recovery["recovered_at"], 951_827_756.0);
+        assert_eq!(recovery["duration_seconds"], 60.0);
+        assert_eq!(recovery["initial_reasons"][0], "contract-failure");
         let entries = fs::read_dir(directory.path());
         assert!(entries.is_ok());
         assert!(entries.ok().is_some_and(|mut values| values.all(|entry| {

@@ -22,10 +22,18 @@ An incident requires at least one of these conditions:
 
 Unavailable gateway diagnostics alone do not create an incident. This preserves the established behavior and prevents storage churn while the gateway is starting.
 
+An uninterrupted incident is represented as one episode:
+
+- the transition into an incident writes one immutable incident bundle;
+- further unhealthy observations do not write duplicate bundles, regardless of episode duration or changing reason details;
+- one healthy observation starts recovery confirmation;
+- another incident observation cancels the pending recovery;
+- after 60 uninterrupted healthy seconds, `recovery.json` is atomically added to the original incident bundle;
+- a later transition into an incident starts a new episode and writes a new bundle.
+
 ## Resource policy
 
 - Start delay defaults to 180 seconds.
 - Observation interval defaults to 30 seconds and is clamped to at least one second.
-- Incident cooldown defaults to 900 seconds.
+- Recovery confirmation defaults to 60 seconds.
 - No polling thread, async executor, DBus connection, or persistent network connection is retained.
-

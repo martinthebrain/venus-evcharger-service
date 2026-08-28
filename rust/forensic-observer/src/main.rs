@@ -72,10 +72,10 @@ where
             "VENUS_EVCHARGER_OBSERVER_INTERVAL",
             30.0,
         )?,
-        cooldown_seconds: environment_number(
+        recovery_confirmation_seconds: environment_number(
             environment,
-            "VENUS_EVCHARGER_OBSERVER_COOLDOWN",
-            900.0,
+            "VENUS_EVCHARGER_OBSERVER_RECOVERY_CONFIRMATION",
+            60.0,
         )?,
         ..ObserverOptions::default()
     };
@@ -87,7 +87,7 @@ where
         match flag.as_str() {
             "--start-delay" => options.start_delay_seconds = parsed,
             "--interval" => options.interval_seconds = parsed,
-            "--cooldown" => options.cooldown_seconds = parsed,
+            "--recovery-confirmation" => options.recovery_confirmation_seconds = parsed,
             _ => {
                 return Err(ObserverError::Configuration(format!(
                     "unknown option: {flag}"
@@ -134,7 +134,7 @@ fn finite_number(value: &str, name: &str) -> venus_evcharger_forensic_observer::
 }
 
 const fn usage() -> &'static str {
-    "usage: venus-evcharger-forensic-observer <config-path> [--start-delay SECONDS] [--interval SECONDS] [--cooldown SECONDS]\n       venus-evcharger-forensic-observer --validate-config <config-path>"
+    "usage: venus-evcharger-forensic-observer <config-path> [--start-delay SECONDS] [--interval SECONDS] [--recovery-confirmation SECONDS]\n       venus-evcharger-forensic-observer --validate-config <config-path>"
 }
 
 #[cfg(test)]
@@ -173,7 +173,7 @@ mod tests {
                 "1".to_owned(),
                 "--interval".to_owned(),
                 "2".to_owned(),
-                "--cooldown".to_owned(),
+                "--recovery-confirmation".to_owned(),
                 "3".to_owned(),
             ],
             &environment(HashMap::new()),
@@ -184,7 +184,7 @@ mod tests {
                 config_path: PathBuf::from("config.ini"),
                 start_delay_seconds: 1.0,
                 interval_seconds: 2.0,
-                cooldown_seconds: 3.0,
+                recovery_confirmation_seconds: 3.0,
                 ..ObserverOptions::default()
             }))
         );

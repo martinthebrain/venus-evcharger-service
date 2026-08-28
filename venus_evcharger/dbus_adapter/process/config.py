@@ -303,26 +303,32 @@ def _grid_read_spec(defaults: configparser.SectionProxy) -> ReadSpec:
     return {
         "service": str(defaults.get("AutoGridService", "com.victronenergy.system")).strip(),
         "paths": [path for path in grid_paths if path],
-        "interval": 2.0,
+        "interval": _gateway_read_interval(defaults, "DbusGatewayGridReadIntervalSeconds", 2.0),
         "aggregate": "sum",
         "priority": "read",
     }
 
 
 def _pv_read_spec(defaults: configparser.SectionProxy) -> ReadSpec:
-    return {
+    spec: ReadSpec = {
         "service": str(defaults.get("AutoPvService", "")).strip(),
         "prefix": str(defaults.get("AutoPvServicePrefix", "com.victronenergy.pvinverter")).strip(),
         "path": str(defaults.get("AutoPvPath", "/Ac/Power")).strip(),
         "dc_service": str(defaults.get("AutoDcPvService", "com.victronenergy.system")).strip(),
         "dc_path": str(defaults.get("AutoDcPvPath", "/Dc/Pv/Power")).strip(),
         "use_dc_pv": _truthy(defaults.get("AutoUseDcPv", "1")),
-        "interval": 2.0,
+        "interval": _gateway_read_interval(defaults, "DbusGatewayPvReadIntervalSeconds", 2.0),
         "aggregate": "pv-total",
         "priority": "read",
         "optional_zero_on_error": True,
         "optional_confidence": 0.2,
     }
+    aggregate_service = str(defaults.get("DbusGatewayPvAggregateService", "")).strip()
+    aggregate_paths = _configured_paths(defaults.get("DbusGatewayPvAggregatePaths", ""))
+    if aggregate_service and aggregate_paths:
+        spec["aggregate_service"] = aggregate_service
+        spec["aggregate_paths"] = aggregate_paths
+    return spec
 
 
 def _battery_read_spec(defaults: configparser.SectionProxy, battery_service: str) -> ReadSpec:
@@ -331,7 +337,7 @@ def _battery_read_spec(defaults: configparser.SectionProxy, battery_service: str
         "prefix": str(defaults.get("AutoBatteryServicePrefix", "com.victronenergy.battery")).strip(),
         "path": str(defaults.get("AutoBatterySocPath", "/Dc/Battery/Soc")).strip(),
         "aggregate": "first-service" if not battery_service else "",
-        "interval": 2.0,
+        "interval": _gateway_read_interval(defaults, "DbusGatewayBatterySocReadIntervalSeconds", 4.0),
         "priority": "read",
     }
 
@@ -341,7 +347,7 @@ def _battery_power_read_spec(defaults: configparser.SectionProxy) -> ReadSpec:
     return {
         "service": str(defaults.get("AutoBatteryPowerService", "com.victronenergy.system")).strip(),
         "path": str(defaults.get("AutoBatteryPowerPath", "/Dc/Battery/Power")).strip(),
-        "interval": 2.0,
+        "interval": _gateway_read_interval(defaults, "DbusGatewayBatteryPowerReadIntervalSeconds", 10.0),
         "priority": "read",
     }
 
@@ -372,3 +378,17 @@ def _battery_service(defaults: configparser.SectionProxy) -> str:
 
 def _truthy(value: object) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _gateway_read_interval(
+    defaults: configparser.SectionProxy,
+    key: str,
+    fallback: float,
+) -> float:
+    """Return one bounded gateway read cadence in seconds."""
+    return max(0.2, config_get_float(defaults, key, fallback))
+
+
+def _configured_paths(value: object) -> list[str]:
+    """Parse a comma-separated list of absolute semantic DBus paths."""
+    return [path for item in str(value).split(",") if (path := item.strip()).startswith("/")]

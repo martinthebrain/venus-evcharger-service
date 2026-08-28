@@ -121,6 +121,38 @@ class DbusAdapterTickPolicyContracts(unittest.TestCase):
             1.0,
         )
 
+    def test_slow_read_service_time_is_a_pressure_floor_without_queued_commands(self) -> None:
+        slow_reads = TickDemand(
+            critical_read_operations=3,
+            core_read_age_seconds=5.0,
+            operation_p95_ms=480.0,
+        )
+        self.assertEqual(
+            adaptive_tick_seconds(
+                POLICY,
+                slow_reads,
+                circuit_state="ok",
+                resource_state="constrained",
+            ),
+            0.48,
+        )
+
+        queued_command = TickDemand(
+            critical_read_operations=3,
+            critical_queue_operations=1,
+            core_read_age_seconds=5.0,
+            operation_p95_ms=480.0,
+        )
+        self.assertEqual(
+            adaptive_tick_seconds(
+                POLICY,
+                queued_command,
+                circuit_state="ok",
+                resource_state="constrained",
+            ),
+            0.2,
+        )
+
     def test_policy_normalizes_inverted_bounds_and_caps_state_floors(self) -> None:
         inverted = TickPolicy(0.0, -1.0, 5.0, 10.0)
         self.assertEqual(

@@ -14,7 +14,7 @@ from venus_evcharger.ipc.command_types import CommandMapping, CommandPayload
 from venus_evcharger.ipc.energy import EnergyTopologySnapshot
 
 if TYPE_CHECKING:
-    from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+    from venus_evcharger.dbus_adapter.process.health_regulation import GatewayControlSnapshot
 
 _T = TypeVar("_T")
 
@@ -42,6 +42,7 @@ class HealthRole(Protocol):  # pragma: no cover
     def append_health_log(self, health: Mapping[str, object]) -> None: ...
     def health_snapshot(self) -> CommandPayload: ...
     def control_snapshot(self) -> GatewayControlSnapshot: ...
+    def control_snapshot_for_tick(self) -> GatewayControlSnapshot: ...
     def apply_slo_regulation(
         self,
         snapshot: GatewayControlSnapshot | None = None,

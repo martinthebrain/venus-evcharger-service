@@ -100,7 +100,7 @@ class DbusGatewayAdapterSchedulerTests(adapter_cases.AllGatewayAdapterCases):
                     [
                         call(
                             max(50, int(adapter.min_tick_seconds * 1000)),
-                            adapter.loop_role.tick,
+                            adapter.loop_role._timer_tick,
                         ),
                     ],
                 )

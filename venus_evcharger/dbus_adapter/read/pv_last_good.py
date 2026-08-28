@@ -146,15 +146,48 @@ class PvAggregateContinuity:
         self,
         key: str,
         spec: ReadSpec,
+        *,
+        explicit_members: Iterable[PvMember] | None = None,
     ) -> tuple[tuple[PvMember, ...], AggregateState | None]:
         """Return probe members or a completed hold-only aggregate state."""
-        candidates = tuple(self._adapter.energy_discovery.pv_candidates(spec))
+        candidates = self._plan_candidates(spec, explicit_members)
         self._window.retain_members(candidates)
         self._candidates_by_key[key] = candidates
         in_progress = self._aggregates.signature_members(key, PV_TOTAL_AGGREGATE)
-        members = tuple(in_progress if in_progress is not None else self._adapter.energy_discovery.pv_members(spec))
+        members = self._plan_members(
+            spec,
+            candidates,
+            explicit_members=explicit_members,
+            in_progress=in_progress,
+        )
         if members:
             return members, None
+        return (), self._hold_only_state(key, spec)
+
+    def _plan_candidates(
+        self,
+        spec: ReadSpec,
+        explicit_members: Iterable[PvMember] | None,
+    ) -> tuple[PvMember, ...]:
+        if explicit_members is not None:
+            return _normalized_members(explicit_members)
+        return tuple(self._adapter.energy_discovery.pv_candidates(spec))
+
+    def _plan_members(
+        self,
+        spec: ReadSpec,
+        candidates: tuple[PvMember, ...],
+        *,
+        explicit_members: Iterable[PvMember] | None,
+        in_progress: Iterable[PvMember] | None,
+    ) -> tuple[PvMember, ...]:
+        if in_progress is not None:
+            return tuple(in_progress)
+        if explicit_members is not None:
+            return candidates
+        return tuple(self._adapter.energy_discovery.pv_members(spec))
+
+    def _hold_only_state(self, key: str, spec: ReadSpec) -> AggregateState | None:
         state = self._aggregates.state_for(
             key,
             (PV_TOTAL_AGGREGATE, ()),
@@ -162,10 +195,10 @@ class PvAggregateContinuity:
         )
         self.add_estimates(key, state)
         if state.estimated:
-            return (), state
+            return state
         self._aggregates.discard(key)
         self.discard(key)
-        return (), None
+        return None
 
     def record_confirmed(
         self,

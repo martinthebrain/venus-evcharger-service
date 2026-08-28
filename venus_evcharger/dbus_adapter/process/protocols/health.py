@@ -40,6 +40,7 @@ class DbusAdapterHealthContext(Protocol):  # pragma: no cover
     tick_seconds: float
     min_tick_seconds: float
     max_tick_seconds: float
+    health_publish_interval_seconds: float
     health_log_path: str
     health_log_interval_seconds: float
     health_log_max_bytes: int

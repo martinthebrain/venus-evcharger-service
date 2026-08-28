@@ -19,6 +19,7 @@ from venus_evcharger.dbus_adapter.read.aggregate import (
 from venus_evcharger.dbus_adapter.read.protocols import DbusReadAdapter
 from venus_evcharger.dbus_adapter.read.pv import PV_MEMBER_ERROR_BACKOFF_SECONDS
 from venus_evcharger.dbus_adapter.read.pv_last_good import PvAggregateContinuity
+from venus_evcharger.dbus_adapter.read.pv_poll_plan import plan_pv_aggregate_read
 from venus_evcharger.dbus_adapter.read.spec import (
     ReadSpec,
     read_spec_optional_confidence,
@@ -225,22 +226,16 @@ class DbusReadExecutor:
         spec: ReadSpec,
         completion: ReadCompletion,
     ) -> CommandOutcome:
-        members, held_state = self._pv_continuity.plan(key, spec)
-        if held_state is not None:
-            self._complete_aggregate(key, held_state)
-            return "applied"
-        if not members:
-            raise RuntimeError("No available AC or DC PV source candidates")
-        return self._poll_aggregate_step(
-            AggregateStepPlan(
-                key=key,
-                signature=(PV_TOTAL_AGGREGATE, tuple(members)),
-                members=tuple(members),
-                completion=completion,
-                ignore_member_errors=True,
-                empty_confidence=read_spec_optional_confidence(spec),
-            )
+        planned = plan_pv_aggregate_read(
+            self._pv_continuity,
+            key,
+            spec,
+            completion,
         )
+        if isinstance(planned, AggregateState):
+            self._complete_aggregate(key, planned)
+            return "applied"
+        return self._poll_aggregate_step(planned)
 
     def _poll_first_service(
         self,
@@ -295,6 +290,7 @@ class DbusReadExecutor:
             member_count=len(plan.members),
             ignore_member_errors=plan.ignore_member_errors,
             completion=plan.completion,
+            record_discovery_values=plan.record_discovery_values,
         )
         self._submit_busitem(
             service,
@@ -333,11 +329,12 @@ class DbusReadExecutor:
             continuation.path,
             value,
         )
-        self.adapter.energy_discovery.record_pv_value(
-            continuation.service,
-            continuation.path,
-            value,
-        )
+        if continuation.record_discovery_values:
+            self.adapter.energy_discovery.record_pv_value(
+                continuation.service,
+                continuation.path,
+                value,
+            )
         target = read_target(continuation.service, continuation.path)
         if target is not None:
             self.adapter.cache.update_external_read(
@@ -351,12 +348,7 @@ class DbusReadExecutor:
                 continuation.service,
                 continuation.path,
             )
-        self._record_aggregate_member(
-            continuation.state,
-            continuation.service,
-            continuation.path,
-            value,
-        )
+        self._record_aggregate_member(continuation.state, continuation.service, continuation.path, value)
         continuation.state.index += 1
         continuation.completion(
             self._aggregate_step_outcome(
@@ -382,23 +374,27 @@ class DbusReadExecutor:
             )
             continuation.completion("dropped")
             return
-        self._record_optional_aggregate_error(
-            continuation.service,
-            continuation.path,
-            continuation.state,
-            error,
-        )
+        if continuation.record_discovery_values:
+            self._record_optional_aggregate_error(
+                continuation.service,
+                continuation.path,
+                continuation.state,
+                error,
+            )
+        else:
+            self._record_optional_aggregate_error(
+                continuation.service,
+                continuation.path,
+                continuation.state,
+                error,
+                record_discovery_value=False,
+            )
         self._record_optional_interval_factor(
             continuation.key,
             continuation.service,
             continuation.path,
         )
-        self._record_aggregate_member(
-            continuation.state,
-            continuation.service,
-            continuation.path,
-            None,
-        )
+        self._record_aggregate_member(continuation.state, continuation.service, continuation.path, None)
         continuation.state.index += 1
         continuation.completion(
             self._aggregate_step_outcome(
@@ -414,13 +410,16 @@ class DbusReadExecutor:
         path: str,
         state: AggregateState,
         error: BaseException,
+        *,
+        record_discovery_value: bool = True,
     ) -> None:
         self._pv_continuity.record_error(state, service, path, error)
-        self.adapter.energy_discovery.record_pv_error(
-            service,
-            path,
-            error,
-        )
+        if record_discovery_value:
+            self.adapter.energy_discovery.record_pv_error(
+                service,
+                path,
+                error,
+            )
         target = read_target(service, path)
         if target is not None:
             self.adapter.cache.mark_unavailable(

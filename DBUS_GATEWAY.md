@@ -160,16 +160,25 @@ The full-cache heartbeat also carries the latest topology for operational
 diagnostics, but domain consumers do not use that raw cache as their topology
 API. Positive publication intervals have a 0.2 second minimum.
 
-The adapter creates one coherent control/health snapshot per work tick. The
-command mailbox is locked, decoded, and coalesced once into an immutable
-tick-local view shared by scheduling, health, and pruning; it is never cached
-across ticks. Queue directories, cache freshness, SLO observations, event-loop
-metrics, and backpressure are evaluated once and shared by adaptive regulation
-and file publication. `DbusGatewayResourceSampleIntervalSeconds=2` separately
-limits procfs reads. Resource pressure escalates immediately, while distinct
+The adapter creates one coherent control/health snapshot at the public health
+heartbeat cadence and reuses it for intervening scheduler ticks. Direct health
+requests still force a fresh evaluation. Queue directories, cache freshness,
+SLO observations, event-loop metrics, and backpressure are therefore evaluated
+at most once per second under the default configuration and shared by adaptive
+regulation and file publication. The GLib work timer is one-shot and is rearmed
+for the actual next deadline instead of waking at the minimum cadence merely to
+return early. `DbusGatewayResourceSampleIntervalSeconds=2` separately limits
+procfs reads. Resource pressure escalates immediately, while distinct
 recovery thresholds must remain satisfied for
 `DbusGatewayResourceRecoveryHoldSeconds=10` before the state is lowered. This
 prevents tick-rate oscillation near the 64 MiB available-memory boundary.
+
+Grid, PV total, battery SOC, and battery power have independent gateway read
+cadences. Sites with many AC-PV services may set
+`DbusGatewayPvAggregateService` and the comma-separated
+`DbusGatewayPvAggregatePaths` to official Venus system-total paths. This
+reduces control-path DBus transactions while the individual PV services remain
+registered, discoverable, and visible to Venus OS and VRM.
 
 `DbusGatewayHealthLogPath`, `DbusGatewayHealthLogIntervalSeconds`, and
 `DbusGatewayCommandLifecyclePath` control the JSONL diagnostics. These files are

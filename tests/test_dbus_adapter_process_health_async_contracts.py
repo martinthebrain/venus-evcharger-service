@@ -12,10 +12,11 @@ from tests.support.dbus_gateway_adapter_harness import (
     Path,
     gateway_paths,
     process_health_module,
+    process_health_regulation_module,
     tempfile,
 )
 from venus_evcharger.dbus_adapter.health.slo import SloThresholds
-from venus_evcharger.dbus_adapter.process.health import GatewayControlSnapshot
+from venus_evcharger.dbus_adapter.process.health_regulation import GatewayControlSnapshot
 from venus_evcharger.dbus_adapter.read.pv_dormancy import PvDormancyEvidence
 
 
@@ -43,6 +44,32 @@ def _patch_result(stack: ExitStack, name: str, value: object) -> MagicMock:
 
 class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
     """Pin every health boundary that controls asynchronous gateway work."""
+
+    def test_tick_control_snapshot_reuses_only_one_health_heartbeat_interval(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = _adapter(temp_dir)
+            with (
+                patch.object(process_health_module.time, "monotonic", return_value=10.0),
+                patch.object(process_health_module.time, "time", return_value=100.0),
+            ):
+                first = adapter.health_role.control_snapshot()
+
+            with (
+                patch.object(
+                    process_health_module.time,
+                    "monotonic",
+                    side_effect=(10.999, 11.0),
+                ),
+                patch.object(
+                    adapter.health_role,
+                    "control_snapshot",
+                    MagicMock(return_value=first),
+                ) as rebuild,
+            ):
+                self.assertIs(adapter.health_role.control_snapshot_for_tick(), first)
+                self.assertIs(adapter.health_role.control_snapshot_for_tick(), first)
+
+            rebuild.assert_called_once_with()
 
     def test_control_snapshot_composes_exact_sources_and_time_domains(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -413,7 +440,7 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
             adapter.health_role.suspend_advisory_work = MagicMock()
 
             with patch.object(
-                process_health_module,
+                process_health_regulation_module,
                 "regulated_publish_burst",
                 return_value=4,
             ) as regulated_publish_burst:
@@ -436,6 +463,11 @@ class DbusAdapterProcessHealthAsyncContracts(GatewayAdapterContractCase):
                 monotonic_at=1000.0,
                 captured_at=2000.0,
             )
+
+            adapter.health_role.apply_slo_regulation(control)
+            regulated_publish_burst.assert_called_once()
+            adapter.read_scheduler.expedite_healthy.assert_called_once()
+            adapter.health_role.suspend_advisory_work.assert_called_once()
 
     def test_regulation_uses_fallback_state_and_preserves_healthy_work(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

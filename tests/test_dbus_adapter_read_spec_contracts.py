@@ -20,9 +20,12 @@ from venus_evcharger.dbus_adapter.read.spec import (
 class DbusAdapterReadSpecContractTests(unittest.TestCase):
     def test_mapping_parser_preserves_every_supported_field_and_copies_paths(self) -> None:
         paths = ["/A", "/B"]
+        aggregate_paths = ["/Ac/PvOnGrid/Total/Power"]
         spec = read_spec_from_mapping(
             {
                 "aggregate": "pv-total",
+                "aggregate_paths": aggregate_paths,
+                "aggregate_service": "com.victronenergy.system",
                 "dc_path": "/Dc/Pv/Power",
                 "dc_service": "com.victronenergy.system",
                 "interval": 2,
@@ -38,11 +41,14 @@ class DbusAdapterReadSpecContractTests(unittest.TestCase):
             }
         )
         paths.append("/C")
+        aggregate_paths.append("/Ac/PvOnOutput/Total/Power")
 
         self.assertEqual(
             spec,
             {
                 "aggregate": "pv-total",
+                "aggregate_paths": ["/Ac/PvOnGrid/Total/Power"],
+                "aggregate_service": "com.victronenergy.system",
                 "dc_path": "/Dc/Pv/Power",
                 "dc_service": "com.victronenergy.system",
                 "interval": 2.0,

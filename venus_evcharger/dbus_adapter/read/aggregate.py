@@ -32,6 +32,7 @@ class AggregateStepPlan:
     completion: AggregateCompletion
     ignore_member_errors: bool = False
     empty_confidence: float = 1.0
+    record_discovery_values: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,7 @@ class AggregateStepContinuation:
     member_count: int
     ignore_member_errors: bool
     completion: AggregateCompletion
+    record_discovery_values: bool = True
 
 
 def aggregate_signature_members(signature: object, aggregate: str) -> list[tuple[str, str]] | None:

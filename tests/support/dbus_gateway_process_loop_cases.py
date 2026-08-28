@@ -486,7 +486,7 @@ class GatewayProcessLoopCases(GatewayAdapterContractCase):
 
             self.assertEqual(
                 timeout_add.call_args_list,
-                [call(50, adapter.loop_role.tick)],
+                [call(50, adapter.loop_role._timer_tick)],
             )
             self.assertEqual(
                 lifecycle,
