@@ -81,6 +81,14 @@ def _energy_topology_or_none(payload: object) -> EnergyTopologySnapshot | None:
         return None
 
 
+def _is_live_transient_publication(command: CommandMapping) -> bool:
+    """Keep bounded live GUI data flowing while advisory work is throttled."""
+    return (
+        command.get("publication_priority") == "live"
+        and is_transient_publication(command)
+    )
+
+
 class GatewayClient:
     """Small Unix-socket and command-file client used by non-DBus processes."""
 
@@ -114,6 +122,10 @@ class GatewayClient:
 
     def enqueue_command(self, command: CommandMapping) -> GatewayEnqueueResult:
         ordered_command = self._ordered_publication(command)
+        if _is_live_transient_publication(ordered_command):
+            command_id = _accepted_fast_command_id(self._send_fast_publication(ordered_command))
+            if command_id:
+                return GatewayEnqueueResult(True, command_id, "socket")
         if not command_allowed_by_backpressure(ordered_command, self.backpressure_state(max_age_seconds=2.0)):
             return GatewayEnqueueResult(False, reason="backpressure")
         if is_transient_publication(ordered_command):

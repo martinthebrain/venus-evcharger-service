@@ -17,10 +17,24 @@ pub(super) fn command_kind(command: &Map<String, Value>) -> &str {
 }
 
 pub(super) fn command_deadline_expired(command: &Map<String, Value>, now: f64) -> bool {
-    if !command.contains_key("deadline_s") {
+    let canonical = command.get("deadline_s");
+    let legacy = command.get("max_age_seconds");
+    if canonical.is_none() && legacy.is_none() {
         return false;
     }
-    let Some(deadline) = command.get("deadline_s").and_then(Value::as_f64) else {
+    let canonical_deadline = canonical.and_then(Value::as_f64);
+    let legacy_deadline = legacy.and_then(Value::as_f64);
+    if canonical.is_some() && canonical_deadline.is_none()
+        || legacy.is_some() && legacy_deadline.is_none()
+        || canonical_deadline
+            .zip(legacy_deadline)
+            .is_some_and(|(left, right)| {
+                !matches!(left.total_cmp(&right), std::cmp::Ordering::Equal)
+            })
+    {
+        return true;
+    }
+    let Some(deadline) = canonical_deadline.or(legacy_deadline) else {
         return true;
     };
     if !deadline.is_finite() {
@@ -59,6 +73,42 @@ mod tests {
         assert!(command_deadline_expired(&expired, 100.0));
         let invalid: Map<String, Value> = Map::from_iter([("deadline_s".to_owned(), json!(2.0))]);
         assert!(command_deadline_expired(&invalid, 100.0));
+    }
+
+    #[test]
+    fn command_deadlines_accept_the_legacy_alias_only_for_rolling_upgrades() {
+        let valid_legacy: Map<String, Value> = Map::from_iter([
+            ("max_age_seconds".to_owned(), json!(10.0)),
+            ("created_at".to_owned(), json!(95.0)),
+        ]);
+        assert!(!command_deadline_expired(&valid_legacy, 100.0));
+
+        let expired_legacy: Map<String, Value> = Map::from_iter([
+            ("max_age_seconds".to_owned(), json!(2.0)),
+            ("created_at".to_owned(), json!(95.0)),
+        ]);
+        assert!(command_deadline_expired(&expired_legacy, 100.0));
+
+        let matching_aliases: Map<String, Value> = Map::from_iter([
+            ("deadline_s".to_owned(), json!(10.0)),
+            ("max_age_seconds".to_owned(), json!(10.0)),
+            ("created_at".to_owned(), json!(95.0)),
+        ]);
+        assert!(!command_deadline_expired(&matching_aliases, 100.0));
+
+        for malformed in [
+            Map::from_iter([
+                ("deadline_s".to_owned(), json!(10.0)),
+                ("max_age_seconds".to_owned(), json!(9.0)),
+                ("created_at".to_owned(), json!(95.0)),
+            ]),
+            Map::from_iter([
+                ("max_age_seconds".to_owned(), json!("ten")),
+                ("created_at".to_owned(), json!(95.0)),
+            ]),
+        ] {
+            assert!(command_deadline_expired(&malformed, 100.0));
+        }
     }
 
     #[test]

@@ -89,6 +89,25 @@ class FastPublicationTransportTests(unittest.TestCase):
         self.assertIsInstance(sent[PUBLICATION_ORDER_FIELD], int)
         durable.assert_not_called()
 
+    def test_live_socket_publication_bypasses_pressure_without_durable_fallback(self) -> None:
+        client = GatewayClient(self.paths)
+        live = publish_evcs_fields_command({"ac_power_w": 0.0}, priority="live")
+        with (
+            patch.object(client, "backpressure_state") as backpressure,
+            patch.object(
+                client,
+                "_send_fast_publication",
+                return_value={"ok": True, "accepted": True, "command_id": "fast-live"},
+            ) as send,
+            patch.object(client.commands, "enqueue") as durable,
+        ):
+            result = client.enqueue_command(live)
+
+        self.assertEqual(result, GatewayEnqueueResult(True, "fast-live", "socket"))
+        send.assert_called_once()
+        backpressure.assert_not_called()
+        durable.assert_not_called()
+
         with (
             patch.object(client, "backpressure_state", return_value="ok"),
             patch.object(

@@ -500,7 +500,7 @@ impl RefreshMailbox {
             "request_id": token,
             "scope": scope,
             "source_id": Value::Null,
-            "max_age_seconds": maximum_age,
+            "deadline_s": maximum_age,
             "urgency": urgency,
             "reason": reason,
             "source": "auto-input-helper",
@@ -617,7 +617,7 @@ fn parent_is_current(expected: Option<u32>) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Schedule, heartbeat_seconds, topology_available};
+    use super::{RefreshMailbox, Schedule, heartbeat_seconds, topology_available};
     use crate::config::{GridFusionConfig, HelperConfig};
     use crate::energy::{ExternalPollingPolicy, PvProjectionPolicy};
     use std::fs;
@@ -704,6 +704,23 @@ mod tests {
         assert!(topology_available(&path));
         fs::write(&path, br#"{"schema_version":2,"sources":[]}"#)?;
         assert!(!topology_available(&path));
+        Ok(())
+    }
+
+    #[test]
+    fn refresh_commands_use_the_gateway_deadline_contract() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let mut mailbox = RefreshMailbox::new(directory.path().to_path_buf());
+        mailbox.enqueue("pv", true, 10.0, "test refresh", 100.0)?;
+        let path = fs::read_dir(directory.path())?
+            .next()
+            .ok_or("missing command")??
+            .path();
+        let payload: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+
+        assert_eq!(payload["deadline_s"], 10.0);
+        assert!(payload.get("max_age_seconds").is_none());
         Ok(())
     }
 }
