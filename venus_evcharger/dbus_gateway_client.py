@@ -122,17 +122,31 @@ class GatewayClient:
 
     def enqueue_command(self, command: CommandMapping) -> GatewayEnqueueResult:
         ordered_command = self._ordered_publication(command)
-        if _is_live_transient_publication(ordered_command):
-            command_id = _accepted_fast_command_id(self._send_fast_publication(ordered_command))
-            if command_id:
-                return GatewayEnqueueResult(True, command_id, "socket")
+        fast_result = self._enqueue_live_before_backpressure(ordered_command)
+        if fast_result is not None:
+            return fast_result
         if not command_allowed_by_backpressure(ordered_command, self.backpressure_state(max_age_seconds=2.0)):
             return GatewayEnqueueResult(False, reason="backpressure")
-        if is_transient_publication(ordered_command):
-            command_id = _accepted_fast_command_id(self._send_fast_publication(ordered_command))
-            if command_id:
-                return GatewayEnqueueResult(True, command_id, "socket")
-        return self._enqueue_durable_command(ordered_command)
+        return self._enqueue_admitted_command(ordered_command)
+
+    def _enqueue_live_before_backpressure(
+        self,
+        command: CommandMapping,
+    ) -> GatewayEnqueueResult | None:
+        if not _is_live_transient_publication(command):
+            return None
+        return self._enqueue_fast(command)
+
+    def _enqueue_admitted_command(self, command: CommandMapping) -> GatewayEnqueueResult:
+        if not is_transient_publication(command):
+            return self._enqueue_durable_command(command)
+        return self._enqueue_fast(command) or self._enqueue_durable_command(command)
+
+    def _enqueue_fast(self, command: CommandMapping) -> GatewayEnqueueResult | None:
+        command_id = _accepted_fast_command_id(self._send_fast_publication(command))
+        if not command_id:
+            return None
+        return GatewayEnqueueResult(True, command_id, "socket")
 
     def _enqueue_durable_command(
         self,
