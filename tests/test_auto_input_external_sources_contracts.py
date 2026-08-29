@@ -938,6 +938,12 @@ class ConfiguredEnergySourceContracts(unittest.TestCase):
                 values["backoff_base_seconds"] = 0.001
             self.assertEqual(getattr(ExternalPollingPolicy(**values), field), 0.001)
 
+        with self.assertRaisesRegex(
+            ValueError,
+            "cycle time budget must not exceed 3 seconds",
+        ):
+            ExternalPollingPolicy(cycle_budget_seconds=3.001)
+
         for invalid in (-0.001, float("nan"), float("inf"), -float("inf")):
             values = defaults | {"last_good_max_age_seconds": invalid}
             with self.subTest(invalid=invalid), self.assertRaises(ValueError) as error:

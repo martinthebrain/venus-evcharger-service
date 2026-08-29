@@ -33,6 +33,10 @@ DIRECT_TIME_FIELDS: Final = frozenset(
         "captured_monotonic",
         "heartbeat_at",
         "heartbeat_monotonic",
+        "attempted_at",
+        "next_poll_at",
+        "observed_at",
+        "observed_monotonic",
         "age_seconds",
     }
 )

@@ -13,7 +13,11 @@ from typing import Literal
 
 from venus_evcharger.energy.models import EnergySourceDefinition, EnergySourceSnapshot
 from venus_evcharger.energy.read_steps import EnergySourceStepReader
-from venus_evcharger.inputs.helper.external_contracts import ExternalPollingPolicy, ExternalSourcePoll
+from venus_evcharger.inputs.helper.external_contracts import (
+    MAX_EXTERNAL_CYCLE_BUDGET_SECONDS,
+    ExternalPollingPolicy,
+    ExternalSourcePoll,
+)
 
 _SOURCE_READ_ERRORS = (OSError, RuntimeError, subprocess.SubprocessError, TimeoutError, TypeError, ValueError)
 _AttemptStatus = Literal["success", "failed", "in_progress"]
@@ -82,7 +86,10 @@ class ExternalSourceScheduler:
 
     def poll(self, now: float) -> tuple[ExternalSourcePoll, ...]:
         cycle_started_monotonic = self._monotonic()
-        deadline = cycle_started_monotonic + self.policy.cycle_budget_seconds
+        deadline = cycle_started_monotonic + min(
+            self.policy.cycle_budget_seconds,
+            MAX_EXTERNAL_CYCLE_BUDGET_SECONDS,
+        )
         attempted: dict[str, _AttemptStatus] = {}
         monotonic_now = cycle_started_monotonic
         definition = self._next_due_definition(monotonic_now)

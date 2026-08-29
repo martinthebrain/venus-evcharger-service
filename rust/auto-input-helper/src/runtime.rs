@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rustix::time::{ClockId, clock_gettime};
 use serde_json::{Value, json};
 
+use crate::capacity_persistence::{CapacityPersistence, PersistenceOutcome};
 use crate::config::HelperConfig;
 use crate::error::{HelperError, Result};
 use crate::external::ConfiguredEnergySources;
@@ -100,6 +101,7 @@ struct HelperRuntime<'a> {
     schedule: Schedule,
     warning_after: BTreeMap<&'static str, f64>,
     external: ConfiguredEnergySources,
+    capacity_persistence: CapacityPersistence,
 }
 
 impl<'a> HelperRuntime<'a> {
@@ -118,6 +120,7 @@ impl<'a> HelperRuntime<'a> {
             identity,
             warning_after: BTreeMap::new(),
             external: ConfiguredEnergySources::new(config),
+            capacity_persistence: CapacityPersistence::new(config, monotonic),
         }
     }
 
@@ -159,6 +162,28 @@ impl<'a> HelperRuntime<'a> {
         } else {
             None
         };
+        if let Some(cycle) = external_cycle.as_ref() {
+            match self
+                .capacity_persistence
+                .observe(cycle.capacity_estimate.as_ref(), monotonic)
+            {
+                Ok(PersistenceOutcome::Written) => {
+                    eprintln!(
+                        "venus-evcharger-auto-input-helper: persisted changed battery capacity estimate"
+                    );
+                }
+                Ok(
+                    PersistenceOutcome::Pending
+                    | PersistenceOutcome::Unchanged
+                    | PersistenceOutcome::Disabled,
+                ) => {}
+                Err(error) => self.warn(
+                    "capacity-persistence",
+                    monotonic,
+                    &format!("battery capacity persistence failed: {error}"),
+                ),
+            }
+        }
         self.state.apply(
             decoded,
             due,

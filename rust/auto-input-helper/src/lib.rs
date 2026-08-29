@@ -1,5 +1,6 @@
 //! Headless, gateway-only Auto input helper for Venus EV Charger.
 
+pub mod capacity_persistence;
 pub mod config;
 pub mod connectors;
 pub mod energy;

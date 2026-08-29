@@ -39,6 +39,7 @@ class AutoInputHelperProcessTests(unittest.TestCase):
             self.assertEqual(main(["/config.ini", "/run/input.json", "4", "7", "instance"]), 0)
         helper_class.assert_called_once_with("/config.ini", "/run/input.json", "4", "7", "instance")
         helper_class.return_value.run.assert_called_once_with()
+        helper_class.return_value.run_once.assert_not_called()
         basic_config.assert_called_once_with(
             format="%(levelname)s [pid=%(process)d %(threadName)s] %(message)s",
             level=20,
@@ -72,6 +73,13 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         self.assertIsNone(args.parent_pid)
         self.assertIsNone(args.helper_generation)
         self.assertIsNone(args.runtime_instance_id)
+        self.assertFalse(args.once)
+
+    def test_once_mode_uses_the_threadless_single_collection(self) -> None:
+        with patch("venus_evcharger_auto_input_helper.AutoInputHelper") as helper_class:
+            self.assertEqual(main(["--once", "/config.ini"]), 0)
+        helper_class.return_value.run_once.assert_called_once_with()
+        helper_class.return_value.run.assert_not_called()
 
     def test_argument_parser_uses_the_deployment_config_by_default(self) -> None:
         args = _main_args([])
@@ -218,6 +226,28 @@ class AutoInputHelperProcessTests(unittest.TestCase):
                 call("Auto input helper stopping pid=%s", 52),
             ],
         )
+
+    def test_run_once_publishes_one_complete_snapshot_without_liveness_threads(self) -> None:
+        helper = object.__new__(AutoInputHelper)
+        helper.snapshots = MagicMock()
+        helper.sources = MagicMock()
+
+        helper.run_once()
+
+        helper.snapshots.write_lifecycle.assert_called_once_with("initializing")
+        helper.snapshots.refresh_all.assert_called_once_with()
+        helper.sources.close.assert_called_once_with()
+
+    def test_run_once_cleanup_is_unconditional_when_collection_fails(self) -> None:
+        helper = object.__new__(AutoInputHelper)
+        helper.snapshots = MagicMock()
+        helper.snapshots.refresh_all.side_effect = RuntimeError("collection failed")
+        helper.sources = MagicMock()
+
+        with self.assertRaisesRegex(RuntimeError, "collection failed"):
+            helper.run_once()
+
+        helper.sources.close.assert_called_once_with()
 
     def test_run_cleanup_is_unconditional_when_the_main_loop_fails(self) -> None:
         helper = object.__new__(AutoInputHelper)
@@ -409,6 +439,7 @@ class AutoInputHelperProcessTests(unittest.TestCase):
         self.assertEqual(
             vars(args),
             {
+                "once": False,
                 "config_path": "config",
                 "snapshot_path": "snapshot",
                 "parent_pid": "parent",

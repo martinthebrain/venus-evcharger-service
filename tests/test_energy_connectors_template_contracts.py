@@ -84,6 +84,7 @@ class EnergyConnectorsTemplateContractTests(unittest.TestCase):
                 service_name="http://energy.local",
                 physical_id="battery-bank-a",
                 physical_priority=7,
+                battery_chemistry="lfp",
                 soc=61.5,
                 usable_capacity_wh=8400.0,
                 net_battery_power_w=-1200.0,

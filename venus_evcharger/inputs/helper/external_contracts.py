@@ -21,6 +21,7 @@ ProjectionMeasurementStatus = Literal["fresh", "stale"]
 PV_SOURCE_POLICIES = frozenset(
     {"gateway_only", "gateway_preferred", "external_preferred", "external_only"}
 )
+MAX_EXTERNAL_CYCLE_BUDGET_SECONDS = 3.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +177,11 @@ def _validate_external_polling_policy(policy: ExternalPollingPolicy) -> None:
     _require_positive(policy.backoff_max_seconds, "backoff maximum")
     _require_non_negative(policy.last_good_max_age_seconds, "last-good maximum age")
     _require_positive(policy.cycle_budget_seconds, "cycle time budget")
+    if policy.cycle_budget_seconds > MAX_EXTERNAL_CYCLE_BUDGET_SECONDS:
+        raise ValueError(
+            "External energy-source cycle time budget must not exceed "
+            f"{MAX_EXTERNAL_CYCLE_BUDGET_SECONDS:g} seconds"
+        )
     if policy.backoff_max_seconds < policy.backoff_base_seconds:
         raise ValueError("External energy-source backoff maximum must cover its base")
 
@@ -221,6 +227,7 @@ __all__ = [
     "ExternalPollingPolicy",
     "ExternalSourcePoll",
     "GatewayBatteryMeasurements",
+    "MAX_EXTERNAL_CYCLE_BUDGET_SECONDS",
     "PV_SOURCE_POLICIES",
     "ProjectedEnergyValue",
     "ProjectionMeasurementStatus",

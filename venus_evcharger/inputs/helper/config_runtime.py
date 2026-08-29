@@ -13,6 +13,7 @@ from venus_evcharger.energy.config import load_energy_source_settings
 from venus_evcharger.energy.grid_fusion_contracts import GridFusionConfig
 from venus_evcharger.energy.models import ENERGY_SOURCE_CONNECTOR_TYPES, EnergySourceDefinition
 from venus_evcharger.inputs.helper.external_contracts import (
+    MAX_EXTERNAL_CYCLE_BUDGET_SECONDS,
     PV_SOURCE_POLICIES,
     ExternalPollingPolicy,
     PvProjectionPolicy,
@@ -415,6 +416,7 @@ def _external_polling_policy(
             _ConfigKey.EXTERNAL_CYCLE_BUDGET,
             2.0,
             minimum=0.05,
+            maximum=MAX_EXTERNAL_CYCLE_BUDGET_SECONDS,
         ),
     )
 

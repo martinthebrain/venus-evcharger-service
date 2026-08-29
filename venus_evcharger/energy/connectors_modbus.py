@@ -264,6 +264,7 @@ def _build_modbus_energy_source_snapshot(
         service_name=_modbus_source_name(source, settings.transport_settings),
         physical_id=source.physical_id,
         physical_priority=source.physical_priority,
+        battery_chemistry=source.battery_chemistry,
         soc=soc_value,
         usable_capacity_wh=usable_capacity_wh,
         net_battery_power_w=_numeric_progress_value(values, "battery_power"),
