@@ -21,6 +21,7 @@ run_differential() {
 run_checks() {
 	cargo fmt --all -- --check
 	cargo test --all-targets --locked
+	cargo build --bin venus-evcharger-auto-input-helper --locked
 	run_differential "${CARGO_TARGET_DIR:-$ROOT/target}/debug/venus-evcharger-auto-input-helper"
 	cargo clippy --all-targets --locked -- -D warnings
 	RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --locked
@@ -48,6 +49,7 @@ docker run --rm \
 	sh -c 'rustup component add rustfmt clippy >/dev/null &&
 		cargo fmt --all -- --check &&
 		cargo test --all-targets --locked &&
+		cargo build --bin venus-evcharger-auto-input-helper --locked &&
 		cargo clippy --all-targets --locked -- -D warnings &&
 		cargo doc --no-deps --locked'
 
