@@ -111,11 +111,11 @@ fn optional_pv_timeouts_never_trip_the_circuit() {
 }
 
 #[test]
-fn load_pressure_degrades_but_cpu_pressure_is_protective() {
+fn load_pressure_throttles_without_degrading_but_cpu_pressure_is_protective() {
     let mut load_health = GatewayHealthMonitor::new(clocks(100.0));
     let load = load_health.snapshot(&resources(&["load"]), clocks(101.0));
-    assert_eq!(load.performance_state, "degraded");
-    assert_eq!(load.state, "degraded");
+    assert_eq!(load.performance_state, "ok");
+    assert_eq!(load.state, "ok");
     assert_eq!(load.protective_cause, "");
 
     let mut cpu_health = GatewayHealthMonitor::new(clocks(100.0));

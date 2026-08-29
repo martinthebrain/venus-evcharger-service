@@ -69,10 +69,7 @@ pub(super) fn performance_state(
 ) -> &'static str {
     if resource_is_protective(resources) || backpressure == "protective" {
         "protective"
-    } else if resources.state == ResourceState::Constrained
-        || slo_violated
-        || matches!(backpressure, "congested" | "slow")
-    {
+    } else if slo_violated || matches!(backpressure, "congested" | "slow") {
         "degraded"
     } else {
         "ok"
@@ -166,10 +163,10 @@ mod tests {
     }
 
     #[test]
-    fn managed_load_pressure_degrades_without_becoming_protective() {
+    fn managed_load_pressure_throttles_without_degrading_health() {
         assert_eq!(
             performance_state(&resources(ResourceState::Constrained), false, "ok"),
-            "degraded"
+            "ok"
         );
         assert_eq!(
             performance_state(&resources(ResourceState::Busy), false, "ok"),
