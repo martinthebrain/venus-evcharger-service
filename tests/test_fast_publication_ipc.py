@@ -130,6 +130,28 @@ class FastPublicationTransportTests(unittest.TestCase):
         self.assertEqual(fallback["fields"], live["fields"])
         self.assertIsInstance(fallback[PUBLICATION_ORDER_FIELD], int)
 
+    def test_diagnostic_socket_publication_requires_backpressure_admission(self) -> None:
+        client = GatewayClient(self.paths)
+        diagnostic = publish_evcs_fields_command(
+            {"diagnostic_text": "ready"},
+            priority="diagnostic",
+        )
+        with (
+            patch.object(client, "backpressure_state", return_value="ok") as backpressure,
+            patch.object(
+                client,
+                "_send_fast_publication",
+                return_value={"ok": True, "accepted": True, "command_id": "fast-diagnostic"},
+            ) as send,
+            patch.object(client.commands, "enqueue") as durable,
+        ):
+            result = client.enqueue_command(diagnostic)
+
+        self.assertEqual(result, GatewayEnqueueResult(True, "fast-diagnostic", "socket"))
+        backpressure.assert_called_once_with(max_age_seconds=2.0)
+        send.assert_called_once()
+        durable.assert_not_called()
+
     def test_client_rejects_incomplete_or_invalid_socket_acceptance(self) -> None:
         live = publish_evcs_fields_command({"ac_power_w": 1200.0}, priority="live")
         rejected_responses = (
