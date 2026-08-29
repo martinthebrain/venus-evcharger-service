@@ -126,6 +126,7 @@ class EnergyConnectorsOpenDtuContractTests(unittest.TestCase):
                 service_name="http://opendtu.local",
                 physical_id="roof-array",
                 physical_priority=7,
+                battery_chemistry="lfp",
                 ac_power_w=123.0,
                 pv_input_power_w=145.0,
                 operating_mode="producing",

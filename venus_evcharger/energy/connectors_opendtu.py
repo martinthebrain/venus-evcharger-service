@@ -218,6 +218,7 @@ def _opendtu_completed_snapshot(
         service_name=_opendtu_source_name(source, settings),
         physical_id=source.physical_id,
         physical_priority=source.physical_priority,
+        battery_chemistry=source.battery_chemistry,
         ac_power_w=ac_power,
         pv_input_power_w=pv_input_power,
         operating_mode="producing" if _opendtu_any_producing(online_inverters) else "idle",

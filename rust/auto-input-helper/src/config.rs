@@ -4,7 +4,8 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 use crate::energy::{
-    ConnectorType, EnergyRole, EnergySourceDefinition, ExternalPollingPolicy, PvProjectionPolicy,
+    ConnectorType, EnergyRole, EnergySourceDefinition, ExternalPollingPolicy,
+    MAX_EXTERNAL_CYCLE_BUDGET_SECONDS, PvProjectionPolicy,
 };
 use crate::error::{HelperError, Result};
 use crate::ini::{IniDefaults, read_bounded_text};
@@ -261,7 +262,7 @@ fn energy_runtime_settings(
                 "ExternalEnergySourceCycleBudgetSeconds",
                 2.0,
                 0.05,
-                None,
+                Some(MAX_EXTERNAL_CYCLE_BUDGET_SECONDS),
             )?,
         },
         pv_projection: PvProjectionPolicy {
@@ -834,6 +835,15 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let (_directory, path) = config("AutoEnergySources=\nAutoPvSourcePolicy=external_only\n")?;
         assert!(HelperConfig::load(&path, None).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn external_cycle_budget_is_hard_capped_for_threadless_runtime()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let (_directory, path) = config("ExternalEnergySourceCycleBudgetSeconds=120\n")?;
+        let loaded = HelperConfig::load(&path, None)?;
+        assert!((loaded.external_polling.cycle_budget_seconds - 3.0).abs() < f64::EPSILON);
         Ok(())
     }
 

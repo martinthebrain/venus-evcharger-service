@@ -77,6 +77,14 @@ class AutoInputHelper:
             self.sources.close()
             logging.info("Auto input helper stopping pid=%s", os.getpid())
 
+    def run_once(self) -> None:
+        """Collect and publish one snapshot without starting runtime threads."""
+        self.snapshots.write_lifecycle("initializing")
+        try:
+            self.snapshots.refresh_all()
+        finally:
+            self.sources.close()
+
     def _handle_signal(self, signum: int, _frame: object) -> None:
         logging.info("Auto input helper received signal %s", signum)
         self.liveness.request_stop()
@@ -126,7 +134,10 @@ def main(argv: list[str] | None = None) -> int:
         args.helper_generation,
         args.runtime_instance_id,
     )
-    helper.run()
+    if args.once:
+        helper.run_once()
+    else:
+        helper.run()
     return 0
 
 
@@ -141,6 +152,11 @@ def _default_config_path() -> str:
 
 def _main_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the Venus EV charger Auto input helper.")
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="collect and publish one snapshot, then exit",
+    )
     parser.add_argument("config_path", nargs="?", default=_default_config_path())
     parser.add_argument("snapshot_path", nargs="?")
     parser.add_argument("parent_pid", nargs="?")

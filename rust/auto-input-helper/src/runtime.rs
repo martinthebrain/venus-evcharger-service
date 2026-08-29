@@ -11,6 +11,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rustix::time::{ClockId, clock_gettime};
 use serde_json::{Value, json};
 
+use crate::capacity_persistence::{CapacityPersistence, PersistenceOutcome};
 use crate::config::HelperConfig;
 use crate::error::{HelperError, Result};
 use crate::external::ConfiguredEnergySources;
@@ -100,6 +101,7 @@ struct HelperRuntime<'a> {
     schedule: Schedule,
     warning_after: BTreeMap<&'static str, f64>,
     external: ConfiguredEnergySources,
+    capacity_persistence: CapacityPersistence,
 }
 
 impl<'a> HelperRuntime<'a> {
@@ -118,6 +120,7 @@ impl<'a> HelperRuntime<'a> {
             identity,
             warning_after: BTreeMap::new(),
             external: ConfiguredEnergySources::new(config),
+            capacity_persistence: CapacityPersistence::new(config, monotonic),
         }
     }
 
@@ -159,6 +162,28 @@ impl<'a> HelperRuntime<'a> {
         } else {
             None
         };
+        if let Some(cycle) = external_cycle.as_ref() {
+            match self
+                .capacity_persistence
+                .observe(cycle.capacity_estimate.as_ref(), monotonic)
+            {
+                Ok(PersistenceOutcome::Written) => {
+                    eprintln!(
+                        "venus-evcharger-auto-input-helper: persisted changed battery capacity estimate"
+                    );
+                }
+                Ok(
+                    PersistenceOutcome::Pending
+                    | PersistenceOutcome::Unchanged
+                    | PersistenceOutcome::Disabled,
+                ) => {}
+                Err(error) => self.warn(
+                    "capacity-persistence",
+                    monotonic,
+                    &format!("battery capacity persistence failed: {error}"),
+                ),
+            }
+        }
         self.state.apply(
             decoded,
             due,
@@ -500,7 +525,7 @@ impl RefreshMailbox {
             "request_id": token,
             "scope": scope,
             "source_id": Value::Null,
-            "max_age_seconds": maximum_age,
+            "deadline_s": maximum_age,
             "urgency": urgency,
             "reason": reason,
             "source": "auto-input-helper",
@@ -617,7 +642,7 @@ fn parent_is_current(expected: Option<u32>) -> Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Schedule, heartbeat_seconds, topology_available};
+    use super::{RefreshMailbox, Schedule, heartbeat_seconds, topology_available};
     use crate::config::{GridFusionConfig, HelperConfig};
     use crate::energy::{ExternalPollingPolicy, PvProjectionPolicy};
     use std::fs;
@@ -704,6 +729,23 @@ mod tests {
         assert!(topology_available(&path));
         fs::write(&path, br#"{"schema_version":2,"sources":[]}"#)?;
         assert!(!topology_available(&path));
+        Ok(())
+    }
+
+    #[test]
+    fn refresh_commands_use_the_gateway_deadline_contract() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let directory = tempfile::tempdir()?;
+        let mut mailbox = RefreshMailbox::new(directory.path().to_path_buf());
+        mailbox.enqueue("pv", true, 10.0, "test refresh", 100.0)?;
+        let path = fs::read_dir(directory.path())?
+            .next()
+            .ok_or("missing command")??
+            .path();
+        let payload: serde_json::Value = serde_json::from_slice(&fs::read(path)?)?;
+
+        assert_eq!(payload["deadline_s"], 10.0);
+        assert!(payload.get("max_age_seconds").is_none());
         Ok(())
     }
 }

@@ -33,7 +33,7 @@ class GatewayHealthStateContractsTests(unittest.TestCase):
             ("ok", "busy", "ok", "ok"),
             ("ok", "ok", "congested", "degraded"),
             ("ok", "ok", "slow", "degraded"),
-            ("ok", "constrained", "ok", "degraded"),
+            ("ok", "constrained", "ok", "ok"),
             ("ok", "ok", "protective", "protective"),
         )
         for slo, resources, backpressure, expected in cases:

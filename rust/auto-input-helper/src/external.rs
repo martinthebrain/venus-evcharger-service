@@ -6,12 +6,14 @@ use std::time::Duration;
 use rustix::time::{ClockId, clock_gettime};
 use serde_json::{Map, Value, json};
 
+use crate::capacity_persistence::CapacityEstimate;
 use crate::config::HelperConfig;
 use crate::connectors::{EnergyConnector, build_connector};
 use crate::energy::{
     EnergyClusterSnapshot, EnergyLearningProfile, EnergyRole, EnergySourceDefinition,
-    EnergySourceSnapshot, ExternalPollingPolicy, ExternalSourcePoll, MeasurementStatus,
-    ProjectedEnergyValue, PvProjectionPolicy, aggregate_energy_sources, number,
+    EnergySourceSnapshot, ExternalPollingPolicy, ExternalSourcePoll,
+    MAX_EXTERNAL_CYCLE_BUDGET_SECONDS, MeasurementStatus, ProjectedEnergyValue, PvProjectionPolicy,
+    aggregate_energy_sources, number,
 };
 use crate::forecast::derive_energy_forecast;
 use crate::learning::update_learning_profile;
@@ -181,7 +183,11 @@ impl ExternalSourceScheduler {
         let definition = &self.definitions[index];
         let state = &mut self.states[index];
         state.attempted_at = Some(epoch);
-        let deadline = cycle_monotonic + self.policy.cycle_budget_seconds;
+        let deadline = cycle_monotonic
+            + self
+                .policy
+                .cycle_budget_seconds
+                .min(MAX_EXTERNAL_CYCLE_BUDGET_SECONDS);
         let timeout = self
             .request_timeout_seconds
             .min((deadline - monotonic_now()).max(0.001));
@@ -333,6 +339,7 @@ pub struct ExternalEnergyCycle {
     pub battery_observed_at: Option<f64>,
     pub battery_observed_monotonic: Option<f64>,
     pub polls: Vec<ExternalSourcePoll>,
+    pub capacity_estimate: Option<CapacityEstimate>,
 }
 
 /// Domain owner for scheduler state, aggregation, learning, and PV selection.
@@ -403,6 +410,11 @@ impl ConfiguredEnergySources {
             &self.gateway_source_id,
             self.gateway_definition.as_ref(),
         );
+        let capacity_estimate = inferred_capacity_candidate(
+            gateway_measurements,
+            self.gateway_definition.as_ref(),
+            &self.gateway_source_id,
+        );
         let mut aggregate_sources = contributing.clone();
         if let Some(source) = &gateway {
             aggregate_sources.push(source.clone());
@@ -431,8 +443,35 @@ impl ConfiguredEnergySources {
             battery_observed_at: selection.1,
             battery_observed_monotonic: selection.2,
             polls,
+            capacity_estimate,
         }
     }
+}
+
+fn inferred_capacity_candidate(
+    measurements: GatewayBatteryMeasurements<'_>,
+    definition: Option<&EnergySourceDefinition>,
+    fallback_source_id: &str,
+) -> Option<CapacityEstimate> {
+    let definition = definition?;
+    let installed_capacity_ah = measurements.capacity_ah.and_then(|item| item.value)?;
+    let (usable_capacity_wh, nominal_voltage_v, cell_count) = infer_lfp_capacity(
+        definition,
+        measurements.soc.and_then(|item| item.value),
+        Some(installed_capacity_ah),
+        measurements.voltage.and_then(|item| item.value),
+    )?;
+    CapacityEstimate::new(
+        if definition.source_id.is_empty() {
+            fallback_source_id.to_owned()
+        } else {
+            definition.source_id.clone()
+        },
+        usable_capacity_wh,
+        installed_capacity_ah,
+        nominal_voltage_v,
+        cell_count,
+    )
 }
 
 fn gateway_source(

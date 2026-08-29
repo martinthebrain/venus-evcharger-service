@@ -78,6 +78,44 @@ class AutoInputSnapshotParityTests(unittest.TestCase):
 
         self.assertTrue(compare_snapshots(left, right).equal)
 
+    def test_nested_poll_timestamps_are_normalized_but_presence_remains_semantic(self) -> None:
+        left = snapshot(
+            battery_sources=[
+                {
+                    "source_id": "battery",
+                    "attempted_at": 1000.0,
+                    "observed_at": 999.0,
+                    "observed_monotonic": 99.0,
+                    "next_poll_at": 101.0,
+                }
+            ]
+        )
+        right = snapshot(
+            battery_sources=[
+                {
+                    "source_id": "battery",
+                    "attempted_at": 2000.0,
+                    "observed_at": 1999.0,
+                    "observed_monotonic": 199.0,
+                    "next_poll_at": 201.0,
+                }
+            ]
+        )
+        missing = snapshot(
+            battery_sources=[
+                {
+                    "source_id": "battery",
+                    "attempted_at": None,
+                    "observed_at": 1999.0,
+                    "observed_monotonic": 199.0,
+                    "next_poll_at": 201.0,
+                }
+            ]
+        )
+
+        self.assertTrue(compare_snapshots(left, right).equal)
+        self.assertFalse(compare_snapshots(left, missing).equal)
+
     def test_time_presence_and_semantic_values_remain_part_of_parity(self) -> None:
         missing_timestamp = snapshot(pv_captured_at=None)
         changed_state = snapshot(helper_state="starting")

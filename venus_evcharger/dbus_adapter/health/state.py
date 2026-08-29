@@ -24,7 +24,6 @@ _DEGRADED_PERFORMANCE_SIGNALS = frozenset(
         ("slo", "violated"),
         ("backpressure", "congested"),
         ("backpressure", "slow"),
-        ("resource", "constrained"),
     }
 )
 

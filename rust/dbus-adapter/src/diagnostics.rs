@@ -186,6 +186,7 @@ fn diagnostic_samples(
     if !registry.evcs_registered() {
         return DIAGNOSTIC_FIELDS.into_iter().map(unknown_sample).collect();
     }
+    let service_heartbeat_monotonic = Some(registry.evcs_heartbeat().1);
     let mode = observed_sample(
         "operating_mode",
         registry.evcs_field_observation("mode"),
@@ -193,6 +194,7 @@ fn diagnostic_samples(
         captured_at,
         captured_monotonic,
         stale_after_seconds,
+        service_heartbeat_monotonic,
     );
     let inactive = matches!(mode.get("value").and_then(Value::as_i64), Some(0 | 2));
     let active = observed_sample(
@@ -202,6 +204,7 @@ fn diagnostic_samples(
         captured_at,
         captured_monotonic,
         stale_after_seconds,
+        None,
     );
     let mut samples = vec![
         mode,
@@ -214,6 +217,7 @@ fn diagnostic_samples(
             captured_at,
             captured_monotonic,
             stale_after_seconds,
+            service_heartbeat_monotonic,
         ),
         observed_sample(
             "auto_start_enabled",
@@ -222,6 +226,7 @@ fn diagnostic_samples(
             captured_at,
             captured_monotonic,
             stale_after_seconds,
+            service_heartbeat_monotonic,
         ),
         observed_sample(
             "ac_power_w",
@@ -230,6 +235,7 @@ fn diagnostic_samples(
             captured_at,
             captured_monotonic,
             stale_after_seconds,
+            None,
         ),
         observed_sample(
             "charger_state_code",
@@ -238,6 +244,7 @@ fn diagnostic_samples(
             captured_at,
             captured_monotonic,
             stale_after_seconds,
+            None,
         ),
         observed_sample(
             "decision_reason",
@@ -246,6 +253,7 @@ fn diagnostic_samples(
             captured_at,
             captured_monotonic,
             stale_after_seconds,
+            None,
         ),
         observed_sample(
             "decision_state",
@@ -254,6 +262,7 @@ fn diagnostic_samples(
             captured_at,
             captured_monotonic,
             stale_after_seconds,
+            None,
         ),
         observed_sample(
             "last_health_reason",
@@ -262,6 +271,7 @@ fn diagnostic_samples(
             captured_at,
             captured_monotonic,
             stale_after_seconds,
+            None,
         ),
         active.clone(),
         override_source_sample(&active),
@@ -290,6 +300,7 @@ fn observed_sample(
     captured_at: f64,
     captured_monotonic: f64,
     stale_after_seconds: f64,
+    service_heartbeat_monotonic: Option<f64>,
 ) -> Value {
     let Some(observation) = observation else {
         return unavailable_sample(name);
@@ -306,7 +317,11 @@ fn observed_sample(
             "reason_code": "invalid-publication-value",
         });
     };
-    let stale = captured_monotonic - observation.confirmed_monotonic > stale_after_seconds.max(0.0);
+    let confirmed_monotonic = service_heartbeat_monotonic
+        .map_or(observation.confirmed_monotonic, |heartbeat| {
+            observation.confirmed_monotonic.max(heartbeat)
+        });
+    let stale = captured_monotonic - confirmed_monotonic > stale_after_seconds.max(0.0);
     json!({
         "name": name,
         "value": value,
@@ -403,7 +418,8 @@ fn unknown_sample(name: &str) -> Value {
 mod tests {
     use serde_json::json;
 
-    use super::{ValueKind, normalized_value};
+    use super::{ValueKind, normalized_value, observed_sample};
+    use crate::publication::PublicationFieldObservation;
 
     #[test]
     fn diagnostic_scalars_are_semantically_bounded() {
@@ -417,5 +433,37 @@ mod tests {
             normalized_value(&json!(-1), ValueKind::NonNegativeInteger),
             None
         );
+    }
+
+    #[test]
+    fn control_freshness_uses_only_the_monotonic_service_heartbeat() {
+        let observation = PublicationFieldObservation {
+            value: json!(2),
+            changed_at: 80.0,
+            confirmed_at: 90.0,
+            confirmed_monotonic: 90.0,
+        };
+        let stale = observed_sample(
+            "operating_mode",
+            Some(&observation),
+            ValueKind::Mode,
+            100.0,
+            100.0,
+            5.0,
+            None,
+        );
+        let heartbeat_fresh = observed_sample(
+            "operating_mode",
+            Some(&observation),
+            ValueKind::Mode,
+            100.0,
+            100.0,
+            5.0,
+            Some(98.0),
+        );
+
+        assert_eq!(stale["status"], "stale");
+        assert_eq!(heartbeat_fresh["status"], "fresh");
+        assert_eq!(heartbeat_fresh["confirmed_at"], 90.0);
     }
 }

@@ -486,6 +486,14 @@ ExternalEnergySourceCycleBudgetSeconds=0
             ),
         )
 
+    def test_external_cycle_budget_is_hard_capped_for_threadless_runtime(self) -> None:
+        settings, _ = self._load(
+            """[DEFAULT]
+ExternalEnergySourceCycleBudgetSeconds=120
+"""
+        )
+        self.assertEqual(settings.external_polling_policy.cycle_budget_seconds, 3.0)
+
     def test_external_backoff_maximum_must_cover_base(self) -> None:
         self._assert_config_error(
             """[DEFAULT]

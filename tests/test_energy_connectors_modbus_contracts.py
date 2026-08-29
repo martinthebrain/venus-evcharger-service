@@ -266,6 +266,7 @@ class EnergyConnectorsModbusContractTests(unittest.TestCase):
                 service_name="192.0.2.10",
                 physical_id="battery-rack",
                 physical_priority=17,
+                battery_chemistry="lfp",
                 soc=61.0,
                 usable_capacity_wh=8400.0,
                 net_battery_power_w=-1200.0,

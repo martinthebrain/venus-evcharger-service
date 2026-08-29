@@ -74,6 +74,9 @@ impl AdapterRuntime {
             }),
         )?;
         let diagnostic_health = health.diagnostic(resources, pending_gateway, pending_core);
+        let publication_freshness_deadline_s = self
+            .slo_thresholds
+            .effective_gui_max_age_seconds(self.adaptive_tick.as_secs_f64());
         write_gateway_diagnostics(
             &self.paths.diagnostics_path,
             self.sequence,
@@ -82,7 +85,7 @@ impl AdapterRuntime {
                 health: &diagnostic_health,
                 topology: &self.topology,
                 registry: &self.publication,
-                stale_after_seconds: self.intervals.stale_after_seconds,
+                stale_after_seconds: publication_freshness_deadline_s,
                 dormant_evidence: &dormant_evidence,
                 unavailability_reasons: &unavailability_reasons,
             },

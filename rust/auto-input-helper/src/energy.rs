@@ -5,6 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
+/// Hard upper bound that protects the threadless heartbeat and parent watchdog.
+pub const MAX_EXTERNAL_CYCLE_BUDGET_SECONDS: f64 = 3.0;
+
 /// Supported non-DBus connector families.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConnectorType {

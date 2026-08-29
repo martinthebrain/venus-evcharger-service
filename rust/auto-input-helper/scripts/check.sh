@@ -3,6 +3,7 @@
 set -eu
 
 ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+REPO_ROOT=$(CDPATH='' cd -- "$ROOT/../.." && pwd)
 cd "$ROOT"
 
 if [ ! -f Cargo.lock ]; then
@@ -10,9 +11,18 @@ if [ ! -f Cargo.lock ]; then
 	exit 1
 fi
 
+run_differential() {
+	RUST_BINARY=$1
+	PYTHON=${PYTHON:-python3}
+	"$PYTHON" "$REPO_ROOT/scripts/dev/run_auto_input_helper_differential.py" \
+		--rust-binary "$RUST_BINARY"
+}
+
 run_checks() {
 	cargo fmt --all -- --check
 	cargo test --all-targets --locked
+	cargo build --bin venus-evcharger-auto-input-helper --locked
+	run_differential "${CARGO_TARGET_DIR:-$ROOT/target}/debug/venus-evcharger-auto-input-helper"
 	cargo clippy --all-targets --locked -- -D warnings
 	RUSTDOCFLAGS='-D warnings' cargo doc --no-deps --locked
 }
@@ -39,5 +49,8 @@ docker run --rm \
 	sh -c 'rustup component add rustfmt clippy >/dev/null &&
 		cargo fmt --all -- --check &&
 		cargo test --all-targets --locked &&
+		cargo build --bin venus-evcharger-auto-input-helper --locked &&
 		cargo clippy --all-targets --locked -- -D warnings &&
 		cargo doc --no-deps --locked'
+
+run_differential "$TARGET_CACHE/debug/venus-evcharger-auto-input-helper"
