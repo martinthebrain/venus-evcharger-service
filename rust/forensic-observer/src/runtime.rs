@@ -10,6 +10,7 @@ use crate::artifact::{
 };
 use crate::config::ObserverConfig;
 use crate::error::Result;
+use crate::retention::{RetentionSchedule, prune};
 use crate::snapshot::ForensicSnapshot;
 use crate::system_activity::SystemActivitySampler;
 
@@ -62,8 +63,27 @@ pub fn run(options: &ObserverOptions) -> Result<()> {
     let mut activity_sampler = SystemActivitySampler::start();
     thread::sleep(seconds_duration(options.start_delay_seconds.max(0.0)));
     let mut state = ObserverState::default();
+    let mut retention = RetentionSchedule::default();
     loop {
         observer_iteration(options, &mut state, &mut activity_sampler)?;
+        if retention.due(Instant::now()) {
+            let result = ObserverConfig::load(&options.config_path)
+                .and_then(|config| config.retention_policy())
+                .and_then(|policy| {
+                    prune(
+                        policy,
+                        &options.mounts_path,
+                        &options.storage_lock_path,
+                        state
+                            .active_episode
+                            .as_ref()
+                            .map(|episode| episode.path.as_path()),
+                    )
+                });
+            if result.is_err() {
+                eprintln!("Forensic retention deferred after storage or configuration error");
+            }
+        }
         thread::sleep(seconds_duration(options.interval_seconds.max(1.0)));
     }
 }
