@@ -34,6 +34,10 @@ The path can be overridden consistently for tests or platform integration with
 - The forensic observer acquires a non-blocking shared lease only when an
   incident is ready to be written. If maintenance is active, it defers the
   incident and retries on a later observer cycle.
+- Forensic retention uses a non-blocking exclusive lease during its hourly
+  scan and deletion of completed bundles. This excludes both artifact writers
+  and maintenance. Busy storage defers cleanup until the next hourly pass;
+  cleanup never creates directories below a missing mount. See the
+  [observer retention contract](../rust/forensic-observer/README.md#incident-retention).
 - The EV charger never invokes `fsck`, unmounts storage, or repairs a
   filesystem.
-

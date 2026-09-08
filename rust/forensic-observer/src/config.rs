@@ -34,11 +34,17 @@ impl ObserverConfig {
     pub fn load(path: &Path) -> Result<Self> {
         let source_text = read_bounded_text(path, MAX_CONFIG_BYTES, "observer config")?;
         let ini = IniDocument::parse(&source_text)?;
-        Ok(Self {
+        let config = Self {
             path: path.to_path_buf(),
             source_text,
             ini,
-        })
+        };
+        config.retention_policy()?;
+        Ok(config)
+    }
+
+    pub(crate) fn retention_policy(&self) -> Result<crate::retention::RetentionPolicy> {
+        crate::retention::RetentionPolicy::from_ini(&self.ini)
     }
 
     /// Return the configured device instance or the stable fallback.

@@ -342,6 +342,7 @@ name = "venus-evcharger-forensic-observer"
 version = "1.0.0"
 dependencies = [
  "fs2",
+ "libc",
  "proptest",
  "serde",
  "serde_json",

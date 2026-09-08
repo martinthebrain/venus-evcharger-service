@@ -30,7 +30,7 @@ const DEVICE_PREFIXES: [&str; 3] = ["/dev/sd", "/dev/mmcblk", "/dev/disk/"];
 
 pub(crate) use crate::recovery::write_recovery_with_lease;
 
-/// Non-blocking shared lease held while one incident writes to removable storage.
+/// Non-blocking lease coordinating artifact IO with removable-storage maintenance.
 pub struct StorageLease {
     file: File,
 }
@@ -43,6 +43,14 @@ impl StorageLease {
     /// Returns an error when the lock directory or file cannot be opened, or
     /// when the operating system rejects the lock operation.
     pub fn try_acquire(path: &Path) -> Result<Option<Self>> {
+        Self::try_lock(path, false)
+    }
+
+    pub(crate) fn try_acquire_exclusive(path: &Path) -> Result<Option<Self>> {
+        Self::try_lock(path, true)
+    }
+
+    fn try_lock(path: &Path, exclusive: bool) -> Result<Option<Self>> {
         if let Some(parent) = path.parent().filter(|value| !value.as_os_str().is_empty()) {
             fs::create_dir_all(parent)
                 .map_err(|error| ObserverError::storage("create storage-lock directory", &error))?;
@@ -55,7 +63,12 @@ impl StorageLease {
             .mode(0o600)
             .open(path)
             .map_err(|error| ObserverError::storage("open storage lock", &error))?;
-        match FileExt::try_lock_shared(&file) {
+        let result = if exclusive {
+            FileExt::try_lock_exclusive(&file)
+        } else {
+            FileExt::try_lock_shared(&file)
+        };
+        match result {
             Ok(()) => Ok(Some(Self { file })),
             Err(error) if error.kind() == ErrorKind::WouldBlock => Ok(None),
             Err(error) => Err(ObserverError::storage("acquire storage lock", &error)),

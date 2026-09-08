@@ -1018,6 +1018,21 @@ state endpoints:
 For read-only local inspection on the same listener, see [STATE_API.md](STATE_API.md).
 For stability rules inside `v1`, see [API_VERSIONING.md](API_VERSIONING.md).
 
+## Forensic Incident Retention
+
+The native observer reads these `[DEFAULT]` options from the main INI file:
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `ForensicRetentionDays` | `30` | Maximum age in days since confirmed recovery; positive integer, at most 36500. |
+| `ForensicMaxTotalMiB` | `100` | Best-effort bundle size budget per removable-storage forensic directory; positive integer, at most 1048576. |
+
+Cleanup runs at most hourly, removing up to 128 oldest completed bundles per
+directory. Open incidents and unrecognized content remain protected even when
+over budget. No internal-flash fallback is used. See the
+[retention contract](rust/forensic-observer/README.md#incident-retention)
+for size accounting and recovery-record validation.
+
 ## Validation Before Start
 
 Validate the full wallbox config:
