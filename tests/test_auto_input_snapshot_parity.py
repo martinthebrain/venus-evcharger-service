@@ -18,6 +18,7 @@ from scripts.dev.compare_auto_input_helper_snapshots import (
     load_snapshot,
     main,
 )
+from scripts.dev.run_auto_input_helper_differential import _recovery_source_uses_last_good
 
 
 def snapshot(**changes: object) -> dict[str, object]:
@@ -124,6 +125,35 @@ class AutoInputSnapshotParityTests(unittest.TestCase):
         self.assertFalse(compare_snapshots(snapshot(), missing_timestamp).equal)
         self.assertFalse(compare_snapshots(snapshot(), changed_state).equal)
         self.assertFalse(compare_snapshots(snapshot(), changed_source).equal)
+
+    def test_learning_clock_values_are_normalized_but_missing_observations_are_not(self) -> None:
+        def profile(timestamp: float | None) -> dict[str, object]:
+            return snapshot(battery_learning_profiles={"external": {
+                "last_active_at": timestamp,
+                "last_change_at": timestamp,
+                "last_inactive_at": timestamp,
+                "mode": "hybrid",
+            }})
+
+        self.assertTrue(compare_snapshots(profile(1000.0), profile(2000.0)).equal)
+        self.assertFalse(compare_snapshots(profile(1000.0), profile(None)).equal)
+        self.assertTrue(compare_snapshots(profile(1000.0), profile(0.0)).equal)
+
+    def test_recovery_capture_requires_first_backoff_with_retained_data(self) -> None:
+        source: dict[str, object] = {
+            "source_id": "external", "poll_status": "backoff",
+            "consecutive_failures": 1, "contributing": True,
+        }
+        self.assertTrue(_recovery_source_uses_last_good(snapshot(battery_sources=[source])))
+        for change in (
+            {"poll_status": "failed"}, {"poll_status": "success"},
+            {"consecutive_failures": 0}, {"consecutive_failures": 2},
+            {"contributing": False},
+        ):
+            with self.subTest(change=change):
+                other = snapshot(battery_sources=[source | change])
+                self.assertFalse(_recovery_source_uses_last_good(other))
+                self.assertFalse(compare_snapshots(snapshot(battery_sources=[source]), other).equal)
 
     def test_floats_are_tolerant_but_integer_contracts_are_exact(self) -> None:
         close = snapshot(pv_power=2_300.000_000_5)
