@@ -64,6 +64,32 @@ pub struct ResourcePressureEvidence {
 }
 
 impl ResourceSnapshot {
+    pub(crate) fn critical_cause_active(&self, cause: &str) -> bool {
+        let triggered = self
+            .pressure_evidence
+            .as_ref()
+            .is_some_and(|evidence| evidence.causes.iter().any(|item| item == cause));
+        match cause {
+            "cpu" => self.system_cpu_pct.map_or(triggered, |value| {
+                value
+                    >= if triggered {
+                        CONSTRAINED_EXIT_CPU_PERCENT
+                    } else {
+                        CONSTRAINED_CPU_PERCENT
+                    }
+            }),
+            "memory" => self.mem_available_kb.map_or(triggered, |value| {
+                value
+                    < if triggered {
+                        CONSTRAINED_EXIT_MEM_AVAILABLE_KB
+                    } else {
+                        CONSTRAINED_MEM_AVAILABLE_KB
+                    }
+            }),
+            _ => false,
+        }
+    }
+
     const fn unknown(cpu_count: usize) -> Self {
         Self {
             state: ResourceState::Busy,

@@ -38,7 +38,7 @@ fn resources(causes: &[&str]) -> ResourceSnapshot {
         loadavg_5m: Some(2.0),
         loadavg_15m: Some(1.0),
         load_per_cpu_1m: Some(1.6),
-        system_cpu_pct: Some(92.0),
+        system_cpu_pct: Some(if causes.contains(&"cpu") { 92.0 } else { 60.0 }),
         mem_total_kb: Some(512_000.0),
         mem_available_kb: Some(120_000.0),
         process_rss_kb: Some(8_000.0),
@@ -123,6 +123,64 @@ fn load_pressure_throttles_without_degrading_but_cpu_pressure_is_protective() {
     assert_eq!(cpu.performance_state, "protective");
     assert_eq!(cpu.state, "protective");
     assert_eq!(cpu.protective_cause, "resource-cpu");
+}
+
+#[test]
+fn historical_cpu_peak_does_not_hold_protection_when_only_load_remains_high() {
+    let mut sample = resources(&["load", "cpu"]);
+    let mut health = GatewayHealthMonitor::new(clocks(100.0));
+    assert_eq!(
+        health.snapshot(&sample, clocks(101.0)).performance_state,
+        "protective"
+    );
+    sample.system_cpu_pct = Some(60.0);
+    let recovering = health.snapshot(&sample, clocks(102.0));
+    assert_eq!(recovering.performance_state, "ok");
+    assert!(recovering.state_recovery_pending);
+    assert_eq!(recovering.protective_cause, "recovery-hold");
+    assert_eq!(
+        sample.pressure_evidence.as_ref().map(|e| e.causes.len()),
+        Some(2)
+    );
+    sample.system_cpu_pct = None;
+    assert_eq!(
+        health.snapshot(&sample, clocks(103.0)).performance_state,
+        "protective"
+    );
+    sample.system_cpu_pct = Some(85.0);
+    assert_eq!(
+        health.snapshot(&sample, clocks(104.0)).performance_state,
+        "protective"
+    );
+}
+
+#[test]
+fn memory_protection_holds_until_its_own_exit_threshold() {
+    let mut sample = resources(&["load", "cpu", "memory"]);
+    sample.system_cpu_pct = Some(60.0);
+    sample.mem_available_kb = Some(40_959.0);
+    let mut health = GatewayHealthMonitor::new(clocks(100.0));
+    assert_eq!(
+        health.snapshot(&sample, clocks(101.0)).protective_cause,
+        "resource-memory"
+    );
+    sample.mem_available_kb = Some(40_960.0);
+    assert_eq!(
+        health.snapshot(&sample, clocks(102.0)).performance_state,
+        "ok"
+    );
+}
+
+#[test]
+fn new_critical_pressure_is_not_hidden_by_an_older_different_trigger() {
+    let mut sample = resources(&["load", "memory"]);
+    sample.system_cpu_pct = Some(95.0);
+    sample.mem_available_kb = Some(120_000.0);
+    let mut health = GatewayHealthMonitor::new(clocks(100.0));
+    assert_eq!(
+        health.snapshot(&sample, clocks(101.0)).protective_cause,
+        "resource-cpu"
+    );
 }
 
 #[test]

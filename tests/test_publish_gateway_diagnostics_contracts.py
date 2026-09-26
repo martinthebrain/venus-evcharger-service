@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
 from venus_evcharger.ports.gateway_diagnostics import (
@@ -30,7 +31,8 @@ class GatewayDiscoveryDiagnosticsContractTests(unittest.TestCase):
             )
         )
 
-        values = projection.values(100.0)
+        with patch("venus_evcharger.publish.gateway_diagnostics.time.monotonic", return_value=100.0):
+            values = projection.values()
 
         self.assertEqual(
             values.counter_values(),
@@ -44,7 +46,7 @@ class GatewayDiscoveryDiagnosticsContractTests(unittest.TestCase):
         self.assertEqual(values.age_seconds, 10.0)
 
     def test_unavailable_transport_fails_closed_without_raw_fallback(self) -> None:
-        values = GatewayDiscoveryDiagnostics(_UnavailableReader()).values(100.0)
+        values = GatewayDiscoveryDiagnostics(_UnavailableReader()).values()
 
         self.assertEqual(values.state, "unavailable")
         self.assertEqual(values.pending_work, 0)
@@ -52,15 +54,29 @@ class GatewayDiscoveryDiagnosticsContractTests(unittest.TestCase):
         self.assertEqual(values.unusable_source_count, 0)
         self.assertEqual(values.age_seconds, -1.0)
 
-    def test_future_monotonic_capture_time_is_rejected(self) -> None:
+    def test_future_monotonic_capture_time_fails_closed_without_aborting_cycle(self) -> None:
         projection = GatewayDiscoveryDiagnostics(
             gateway_diagnostics_reader(
                 captured_at=90.0,
                 captured_monotonic=110.0,
             )
         )
-        with self.assertRaisesRegex(ValueError, "captured_monotonic"):
-            projection.values(100.0)
+        with patch("venus_evcharger.publish.gateway_diagnostics.time.monotonic", return_value=100.0):
+            values = projection.values()
+        self.assertEqual(values.state, "unavailable")
+        self.assertEqual(values.age_seconds, -1.0)
+
+    def test_clock_is_sampled_after_concurrent_snapshot_publication(self) -> None:
+        reader = gateway_diagnostics_reader(captured_at=90.0, captured_monotonic=110.0)
+        with patch("venus_evcharger.publish.gateway_diagnostics.time.monotonic", return_value=100.0) as clock:
+            class ConcurrentReader:
+                def read_snapshot(self) -> GatewayDiagnosticsSnapshot:
+                    clock.assert_not_called()
+                    clock.return_value = 111.0
+                    return reader.read_snapshot()
+
+            values = GatewayDiscoveryDiagnostics(ConcurrentReader()).values()
+        self.assertEqual(values.age_seconds, 1.0)
 
 
 if __name__ == "__main__":

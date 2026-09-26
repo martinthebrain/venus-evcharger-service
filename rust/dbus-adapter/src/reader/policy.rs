@@ -30,7 +30,7 @@ pub(super) struct ReadPolicy {
     pub(super) max_pv_services: usize,
     pub(super) service_interval: Duration,
     pub(super) missing_pv_service_interval: Duration,
-    core_read_max_age: Duration,
+    pub(super) core_read_max_age: Duration,
     maximum_tick: Duration,
     pub(super) intervals: HashMap<ReadKey, Duration>,
 }
