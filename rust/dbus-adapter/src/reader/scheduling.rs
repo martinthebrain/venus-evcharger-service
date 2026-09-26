@@ -28,21 +28,27 @@ impl ReadMode {
 impl EnergyReader {
     pub fn tick_demand(&self, now: Instant, monotonic_at: f64) -> (usize, f64) {
         const CORE_KEYS: [ReadKey; 3] = [ReadKey::Grid, ReadKey::Pv, ReadKey::BatterySoc];
-        let due = CORE_KEYS
+        let due: usize = CORE_KEYS
             .into_iter()
             .filter(|key| {
                 self.policy.intervals.contains_key(key)
+                    && self.active.as_ref().is_none_or(|read| read.key != *key)
                     && self
                         .next_due
                         .get(key)
                         .is_none_or(|deadline| *deadline <= now)
             })
-            .count();
-        let active = usize::from(
-            self.active
-                .as_ref()
-                .is_some_and(|read| CORE_KEYS.contains(&read.key)),
-        );
+            .map(|key| self.members(key).len().max(1))
+            .sum();
+        // One aggregate can require several serial D-Bus operations. Include
+        // an optional read already in flight when it blocks due core reads.
+        let active = self.active.as_ref().map_or(0, |read| {
+            if due > 0 || CORE_KEYS.contains(&read.key) {
+                read.members.len().saturating_sub(read.index)
+            } else {
+                0
+            }
+        });
         let maximum_age = CORE_KEYS
             .into_iter()
             .filter_map(|key| {
@@ -63,6 +69,7 @@ impl EnergyReader {
             ReadKey::BatteryCapacityAh,
             ReadKey::BatteryVoltage,
         ];
+        let monotonic_at = Clocks::now().ok().map(|clocks| clocks.monotonic);
         ORDER
             .into_iter()
             .enumerate()
@@ -71,8 +78,31 @@ impl EnergyReader {
                     && self.policy.intervals.contains_key(key)
                     && self.next_due.get(key).is_none_or(|due| *due <= now)
             })
-            .min_by_key(|(priority, key)| (self.next_due.get(key).copied(), *priority))
+            .min_by_key(|(priority, key)| (self.read_deadline(*key, now, monotonic_at), *priority))
             .map(|(_, key)| key)
+    }
+
+    fn read_deadline(
+        &self,
+        key: ReadKey,
+        now: Instant,
+        monotonic_at: Option<f64>,
+    ) -> Option<Instant> {
+        let observed = self.measurements[measurement_index(key)].observed_monotonic;
+        let Some(current) = monotonic_at.filter(|_| observed > 0.0) else {
+            return self.next_due.get(&key).copied();
+        };
+        if !matches!(key, ReadKey::Grid | ReadKey::Pv | ReadKey::BatterySoc) {
+            return self.next_due.get(&key).copied();
+        }
+        // Different polling intervals must not let a younger grid/PV value
+        // overtake an older SoC sample whose freshness deadline is nearer.
+        let remaining = observed + self.policy.core_read_max_age.as_secs_f64() - current;
+        if remaining >= 0.0 {
+            now.checked_add(Duration::from_secs_f64(remaining))
+        } else {
+            now.checked_sub(Duration::from_secs_f64(-remaining))
+        }
     }
 
     pub(super) fn schedule_completed_cycle(&mut self, active: &ActiveRead) {

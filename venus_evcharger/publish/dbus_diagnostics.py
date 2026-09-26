@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Mapping
 
 from venus_evcharger.core.common import _charger_retry_remaining_seconds, _fresh_charger_transport_timestamp
@@ -36,7 +35,7 @@ def _gateway_values(
 ) -> GatewayDiscoveryDiagnosticValues:
     if supplied is not None:
         return supplied
-    return source.values(time.monotonic())
+    return source.values()
 
 
 class DbusPublishDiagnostics:
@@ -173,7 +172,7 @@ class DbusPublishDiagnostics:
 
     def snapshot(self, now: float) -> DiagnosticSnapshot:
         """Return one immutable-cycle view of all diagnostic values."""
-        gateway = self.gateway.values(time.monotonic())
+        gateway = self.gateway.values()
         return DiagnosticSnapshot(
             counters=self.counter_values(now, gateway),
             ages=self.age_values(now, gateway),
@@ -183,9 +182,20 @@ class DbusPublishDiagnostics:
         """Publish diagnostics on change, except age-like values every five seconds."""
         snapshot = self.snapshot(now)
         changed = self.core.publish_fields("diagnostic-counters", snapshot.counters, now)
+        # Confirm unchanged decisions with the existing periodic IPC batch.
+        # A live mainloop alone must not keep old decisions artificially fresh.
+        confirmations = {
+            field: snapshot.counters[field]
+            for field in (
+                "auto_decision_reason",
+                "auto_decision_state",
+                "auto_health",
+                "auto_runtime_overrides_active",
+            )
+        }
         changed |= self.core.publish_fields(
             "diagnostic-ages",
-            snapshot.ages,
+            {**snapshot.ages, **confirmations},
             now,
             interval_seconds=self.service._dbus_slow_publish_interval_seconds,
         )

@@ -7,9 +7,11 @@ from unittest.mock import ANY, patch
 
 from tests.gateway_diagnostics_fixtures import gateway_diagnostics_reader
 from venus_evcharger.bootstrap.publication import EvcsPublicationOwner
+from venus_evcharger.ipc.gateway_pressure import CachedGatewayPressurePolicy
 from venus_evcharger.ports.gateway_publication import (
     CompanionServiceIdentity,
     EvcsServiceIdentity,
+    GatewayPublicationPort,
     PublicationPriority,
     PublicationReceipt,
 )
@@ -21,6 +23,7 @@ from venus_evcharger.publish.dbus_diagnostics_contracts import DiagnosticSnapsho
 from venus_evcharger.publish.dbus_learned import DbusPublishLearned
 from venus_evcharger.publish.dbus_measurements import DbusMeasurementPublisher
 from venus_evcharger.publish.dbus_runtime_view import DbusRuntimeView
+from venus_evcharger.publish.dbus_shared import PublishRuntimePort
 
 
 class _GatewayPublicationStub:
@@ -87,8 +90,8 @@ class _PublishServiceHarness:
     """Minimal typed implementation of the mandatory publish-service port."""
 
     def __init__(self) -> None:
-        self.gateway_publication = _GatewayPublicationStub()
-        self.runtime = _PublishRuntimeStub()
+        self.gateway_publication: GatewayPublicationPort = _GatewayPublicationStub()
+        self.runtime: PublishRuntimePort = _PublishRuntimeStub()
         self._dbus_live_publish_interval_seconds = 1.0
         self._dbus_slow_publish_interval_seconds = 5.0
         self._last_health_code = 0
@@ -123,6 +126,39 @@ def _controller() -> DbusPublishController:
 
 
 class DbusPublishCompositionContractTests(unittest.TestCase):
+    def test_unchanged_decisions_are_confirmed_in_existing_periodic_batch(self) -> None:
+        controller = _controller()
+        service = controller.diagnostics.service
+        with patch.object(
+            CachedGatewayPressurePolicy, "_publish_multiplier", return_value=1.0
+        ), patch.object(
+            service.gateway_publication, "publish_evcs_fields", return_value=PublicationReceipt(True)
+        ) as publish:
+            controller.diagnostics.publish_diagnostic_paths(100.0)
+            publish.reset_mock()
+            controller.diagnostics.publish_diagnostic_paths(101.0)
+            publish.assert_not_called()
+            controller.diagnostics.publish_diagnostic_paths(105.0)
+            publish.assert_called_once()
+            fields = publish.call_args.args[0]
+            self.assertEqual(fields["auto_decision_reason"], "init")
+            self.assertEqual(fields["auto_health"], "init")
+            self.assertIn("auto_decision_state", fields)
+            self.assertIn("auto_runtime_overrides_active", fields)
+            self.assertIn("auto_gateway_diagnostics_age", fields)
+
+    def test_changed_decisions_are_not_delayed_by_confirmation_interval(self) -> None:
+        controller = _controller()
+        controller.diagnostics.publish_diagnostic_paths(100.0)
+        controller.diagnostics.service._last_health_reason = "waiting-surplus"
+        with patch.object(
+            controller.diagnostics.service.gateway_publication,
+            "publish_evcs_fields",
+            return_value=PublicationReceipt(True),
+        ) as publish:
+            controller.diagnostics.publish_diagnostic_paths(101.0)
+        self.assertEqual(publish.call_args.args[0]["auto_decision_reason"], "waiting-surplus")
+
     def test_controller_owns_linear_components_with_explicit_shared_dependencies(self) -> None:
         controller = _controller()
 

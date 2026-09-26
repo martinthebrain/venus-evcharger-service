@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 from venus_evcharger.ports.gateway_diagnostic_discovery import GatewayDiscoveryState
@@ -38,10 +39,12 @@ class GatewayDiscoveryDiagnostics:
     def __init__(self, reader: GatewayDiagnosticsReader) -> None:
         self._reader = reader
 
-    def values(self, now: float) -> GatewayDiscoveryDiagnosticValues:
+    def values(self) -> GatewayDiscoveryDiagnosticValues:
         try:
             snapshot = self._reader.read_snapshot()
-        except GatewayDiagnosticsUnavailable:
+            # The producer may replace the snapshot while the reader is running.
+            age_seconds = snapshot.age_seconds(time.monotonic())
+        except (GatewayDiagnosticsUnavailable, ValueError):
             return GatewayDiscoveryDiagnosticValues("unavailable", 0, 0, 0, -1.0)
         discovery = snapshot.discovery
         return GatewayDiscoveryDiagnosticValues(
@@ -49,7 +52,7 @@ class GatewayDiscoveryDiagnostics:
             pending_work=discovery.pending_work,
             discovered_source_count=discovery.discovered_source_count,
             unusable_source_count=discovery.unusable_source_count,
-            age_seconds=snapshot.age_seconds(now),
+            age_seconds=age_seconds,
         )
 
 

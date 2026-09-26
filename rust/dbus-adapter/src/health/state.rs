@@ -78,15 +78,9 @@ pub(super) fn performance_state(
 
 pub(super) fn resource_is_protective(resources: &ResourceSnapshot) -> bool {
     resources.state == ResourceState::Constrained
-        && resources
-            .pressure_evidence
-            .as_ref()
-            .is_some_and(|evidence| {
-                evidence
-                    .causes
-                    .iter()
-                    .any(|cause| cause == "cpu" || cause == "memory")
-            })
+        && ["cpu", "memory"]
+            .iter()
+            .any(|cause| resources.critical_cause_active(cause))
 }
 
 pub(super) fn protective_cause(
@@ -105,18 +99,10 @@ pub(super) fn protective_cause(
         return "backpressure".to_owned();
     }
     if resource_is_protective(resources) {
-        let causes = resources
-            .pressure_evidence
-            .as_ref()
-            .map(|evidence| {
-                evidence
-                    .causes
-                    .iter()
-                    .filter(|cause| *cause == "cpu" || *cause == "memory")
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
+        let causes = ["cpu", "memory"]
+            .into_iter()
+            .filter(|cause| resources.critical_cause_active(cause))
+            .collect::<Vec<_>>();
         if !causes.is_empty() {
             return format!("resource-{}", causes.join("+"));
         }

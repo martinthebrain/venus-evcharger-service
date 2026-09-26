@@ -25,6 +25,66 @@ DbusGatewayMissingPvDiscoveryIntervalSeconds=60\n",
 }
 
 #[test]
+fn tick_demand_counts_aggregate_members_and_active_remainder_once() -> Result<(), String> {
+    let config = IniConfig::parse("[DEFAULT]\nAutoBatteryService=com.victronenergy.system\n")?;
+    let mut reader = EnergyReader::from_config(&config);
+    let mut services = vec!["com.victronenergy.system".to_owned()];
+    services.extend((0..4).map(|n| format!("com.victronenergy.pvinverter.test{n}")));
+    reader.handle_names(Ok(DbusResultValue::Names(services)))?;
+    let now = Instant::now();
+    // Three grid phases, four AC inverters, DC PV and battery SoC.
+    assert_eq!(reader.tick_demand(now, 100.0).0, 9);
+    reader.start_cycle(ReadKey::Pv, now, 1.0);
+    assert_eq!(reader.tick_demand(now, 100.0).0, 9);
+    // Even after its next due time, the active group is not counted twice.
+    reader.next_due.insert(ReadKey::Pv, now);
+    assert_eq!(reader.tick_demand(now, 100.0).0, 9);
+    let active = reader.active.as_mut().ok_or("missing active PV read")?;
+    active.index = 2;
+    assert_eq!(reader.tick_demand(now, 100.0).0, 7);
+    for key in [ReadKey::Grid, ReadKey::BatterySoc] {
+        reader.next_due.insert(key, now + Duration::from_secs(60));
+    }
+    assert_eq!(reader.tick_demand(now, 100.0).0, 3);
+    Ok(())
+}
+
+#[test]
+fn optional_inflight_read_counts_only_when_blocking_due_core_reads() -> Result<(), String> {
+    let mut reader = reader()?;
+    let now = Instant::now();
+    reader.start_cycle(ReadKey::BatteryPower, now, 1.0);
+    assert_eq!(reader.tick_demand(now, 100.0).0, 4);
+    for key in [ReadKey::Grid, ReadKey::Pv, ReadKey::BatterySoc] {
+        reader.next_due.insert(key, now + Duration::from_secs(60));
+    }
+    assert_eq!(reader.tick_demand(now, 100.0).0, 0);
+    Ok(())
+}
+
+#[test]
+fn older_soc_deadline_precedes_younger_grid_with_shorter_poll_interval() -> Result<(), String> {
+    let mut reader = reader()?;
+    let now = Instant::now();
+    let clock = Clocks::now()?;
+    for key in reader.policy.intervals.keys() {
+        reader.next_due.insert(*key, now + Duration::from_secs(60));
+    }
+    reader.next_due.insert(
+        ReadKey::Grid,
+        now.checked_sub(Duration::from_secs(1)).ok_or("clock")?,
+    );
+    reader.next_due.insert(ReadKey::Pv, now);
+    reader.next_due.insert(ReadKey::BatterySoc, now);
+    reader.measurements[0].observed_monotonic = clock.monotonic - 2.5;
+    reader.measurements[1].observed_monotonic = clock.monotonic - 2.0;
+    reader.measurements[2].observed_monotonic = clock.monotonic - 4.0;
+    assert_eq!(reader.next_due_key(now, true), Some(ReadKey::BatterySoc));
+    assert_eq!(reader.next_due_key(now, false), Some(ReadKey::BatterySoc));
+    Ok(())
+}
+
+#[test]
 fn unvalidated_pv_uses_early_discovery_until_one_numeric_read_succeeds() -> Result<(), String> {
     let mut reader = reader()?;
     reader.handle_names(Ok(DbusResultValue::Names(vec![

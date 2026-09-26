@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import configparser
 import copy
 import os
 import subprocess
@@ -107,8 +108,10 @@ def _recovery_source_succeeded(payload: Mapping[str, object]) -> bool:
 
 def _recovery_source_uses_last_good(payload: Mapping[str, object]) -> bool:
     source = _external_source(payload) or {}
+    if source.get("poll_status") != "backoff":
+        return False
     failures = source.get("consecutive_failures")
-    return isinstance(failures, int) and failures >= 1 and source.get("contributing") is True
+    return isinstance(failures, int) and failures == 1 and source.get("contributing") is True
 
 
 def _recovery_source_restored(payload: Mapping[str, object]) -> bool:
@@ -141,10 +144,19 @@ OnlinePath=data.online
         encoding="utf-8",
     )
     config_path = execution_root / "config.ini"
-    config_path.write_text(
-        base_config(gateway_dir) + external_config("template-http-hybrid", connector),
-        encoding="utf-8",
+    config = configparser.ConfigParser()
+    config.read_string(base_config(gateway_dir) + external_config("template-http-hybrid", connector))
+    # Observe the same stable backoff phase, not a scheduler-dependent error tick.
+    config["DEFAULT"].update(
+        {
+            "ExternalEnergySourceBackoffBaseSeconds": "2",
+            "ExternalEnergySourceBackoffMaxSeconds": "2",
+            "ExternalEnergySourceLastGoodMaxAgeSeconds": "30",
+            "DbusGatewayMaxAgeSeconds": "60",
+        }
     )
+    with config_path.open("w", encoding="utf-8") as config_file:
+        config.write(config_file)
     return config_path, execution_root / "snapshot.json"
 
 
