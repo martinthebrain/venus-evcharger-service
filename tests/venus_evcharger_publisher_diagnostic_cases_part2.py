@@ -207,7 +207,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         controller = build_publish_controller(service, self._real_age_seconds)
 
         with patch(
-            "venus_evcharger.publish.dbus_diagnostics.time.monotonic",
+            "venus_evcharger.publish.gateway_diagnostics.time.monotonic",
             return_value=current_time,
         ):
             counter_values = controller.diagnostics.counter_values(current_time)
@@ -295,7 +295,7 @@ class _TestDbusPublishControllerDiagnosticsPart2:
         )
 
         with patch(
-            "venus_evcharger.publish.dbus_diagnostics.time.monotonic",
+            "venus_evcharger.publish.gateway_diagnostics.time.monotonic",
             return_value=current_time,
         ):
             counter_values = controller.diagnostics.counter_values(current_time)
@@ -944,7 +944,15 @@ class _TestDbusPublishControllerDiagnosticsPart2:
     def test_publish_diagnostic_paths_uses_distinct_transactions_and_or_result(self) -> None:
         service = SimpleNamespace(_dbus_slow_publish_interval_seconds=7.5)
         controller = build_publish_controller(service, self._real_age_seconds)
-        snapshot = DiagnosticSnapshot(counters={"status": 2}, ages={"auto_stale_seconds": 3.0})
+        confirmations = {
+            "auto_decision_reason": "waiting-surplus",
+            "auto_decision_state": "idle",
+            "auto_health": 0,
+            "auto_runtime_overrides_active": 0,
+        }
+        snapshot = DiagnosticSnapshot(
+            counters={"status": 2, **confirmations}, ages={"auto_stale_seconds": 3.0}
+        )
         controller.diagnostics.snapshot = MagicMock(return_value=snapshot)
         controller.core.publish_fields = MagicMock(side_effect=[False, True])
 
@@ -952,10 +960,10 @@ class _TestDbusPublishControllerDiagnosticsPart2:
 
         controller.diagnostics.snapshot.assert_called_once_with(500.0)
         self.assertEqual(controller.core.publish_fields.call_count, 2)
-        controller.core.publish_fields.assert_any_call("diagnostic-counters", {"status": 2}, 500.0)
+        controller.core.publish_fields.assert_any_call("diagnostic-counters", snapshot.counters, 500.0)
         controller.core.publish_fields.assert_any_call(
             "diagnostic-ages",
-            {"auto_stale_seconds": 3.0},
+            {"auto_stale_seconds": 3.0, **confirmations},
             500.0,
             interval_seconds=7.5,
         )
